@@ -9,6 +9,7 @@ A 4K interface fix for **Call to Arms – Gates of Hell: Ostfront**: the UI is e
 > The mod and its tools were built with AI assistance (Claude) — hence "(AI)" in the name.
 
 **⬇ [Скачать готовый мод / Download the mod](../../releases/latest)** — файл `GoH-UI4K-x2-v1.0.zip`.
+Также на / Also on: **[Nexus Mods](https://www.nexusmods.com/calltoarmsgatesofhellostfront/mods/29)** · **[Steam guide](https://steamcommunity.com/sharedfiles/filedetails/?id=3839336153)**
 
 ---
 
