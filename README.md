@@ -81,6 +81,23 @@ The mod leaves the exe and the files the game checks online untouched, but this 
 
 ---
 
+## Virus scan / Проверка на вирусы
+
+The only executable file in the mod is `d3d11.dll`; `ui4k.ini` is text and `ui4k_fonts` is raw image data.
+Единственный исполняемый файл мода — `d3d11.dll`; `ui4k.ini` — текст, `ui4k_fonts` — данные изображений.
+
+| File / Файл | SHA-256 | VirusTotal |
+|---|---|---|
+| `GoH-UI4K-x2-v1.0.zip` (release) | `4502ca4a6afa7c49a79a42136a2d10619a6627c4eab97b60e9305adddbddf7d0` | [0 / 68 — clean](https://www.virustotal.com/gui/file/4502ca4a6afa7c49a79a42136a2d10619a6627c4eab97b60e9305adddbddf7d0) |
+| `d3d11.dll` (inside the zip) | `1cb784245c0d943e5fea6cfc107bea89768de8768c8b91234770b683a41d0f1a` | [0 / 71 — clean](https://www.virustotal.com/gui/file/1cb784245c0d943e5fea6cfc107bea89768de8768c8b91234770b683a41d0f1a) |
+
+- Nexus Mods virus scan: **Safe to use** — [mod page](https://www.nexusmods.com/calltoarmsgatesofhellostfront/mods/29).
+- Results as of 14 Nov 2026. Behaviour tags like "detect-debug-environment" are normal for a d3d11 proxy (it loads the system `d3d11.dll` and hooks its functions); the full source is in `src/`.
+- Verify your download / проверить свой файл (PowerShell):
+  ```
+  Get-FileHash .\GoH-UI4K-x2-v1.0.zip -Algorithm SHA256
+  ```
+
 ## Licenses / Лицензии
 - Code (`src/`, `build.py`, `tools/*.py`): [MIT](LICENSE).
 - Replacement fonts in `tools/fonts/`: their own licenses (SIL OFL 1.1, Apache 2.0, GUST) — see [tools/fonts/README.md](tools/fonts/README.md).
