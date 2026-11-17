@@ -1,0 +1,101 @@
+/* Устойчивость к обновлениям игры: разбор архива шейдеров (gamedata.c).
+ *   test_gamedata.exe <поддельный архив> [<настоящий resource\shader.pak игры>]
+ * Поддельный архив пишет build.py: shader_constants.h с pscSceneGroup 40, кэш-записи под именами VS интерфейса с новым
+ * байткодом (как после обновления игры), запись с чужим именем внутри (защита), сжатая запись (не читается).
+ * С настоящим архивом: размер буфера сцены 39 групп, все 9 имён VS интерфейса — два отпечатка 16.11, шейдеры
+ * автоэкспозиции и размытия находятся по именам. Последняя строка PASS/FAIL. */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <windows.h>
+#include "gamedata.h"
+
+static int fails;
+#define CHECK(c, ...) do { if (!(c)) { fails++; printf("FAIL line %d: ", __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
+
+static unsigned char *load(const char *p, size_t *n)
+{
+    FILE *f = fopen(p, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long l = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    unsigned char *b = malloc((size_t)l);
+    *n = fread(b, 1, (size_t)l, f);
+    fclose(f);
+    return b;
+}
+
+static const char *const UI[] = {
+    "vs[VS]$VCOLOR$VTEXCOORDS#0$TEXCOORDS#0$USE_VCOLOR",
+    "vs[VS]$VCOLOR$VTEXCOORDS#0$TEXCOORDS#0$USE_VCOLOR$ALTITUDE_HAZE",
+    "vs[VS]$TEXCOORDS#1$VTEXCOORDS#1$USE_VCOLOR$VNORMAL$VCOLOR",
+    "vs[VS]$VNORMAL$VCOLOR$VTEXCOORDS#1$TEXCOORDS#1$USE_VCOLOR",
+    "vs[VS]$VNORMAL$VCOLOR$VTEXCOORDS#1$TEXCOORDS#1$USE_VCOLOR$ALTITUDE_HAZE",
+    "vs[VS]$VNORMAL$VCOLOR$VTEXCOORDS#1$TEXCOORDS#1$USE_VCOLOR$BOUNDARY_HAZE",
+    "vs[VS]$VNORMAL$VCOLOR$VTEXCOORDS#1$TEXCOORDS#1$USE_VCOLOR$BOUNDARY_HAZE$ALTITUDE_HAZE",
+    "vs[VS]$VNORMAL$VCOLOR$VTEXCOORDS#1$TEXCOORDS#1$USE_VCOLOR$BOUNDARY_HAZE$TEX_BLEND",
+    "vs[VS]$VNORMAL$VCOLOR$VTEXCOORDS#1$TEXCOORDS#1$USE_VCOLOR$TEX_BLEND",
+};
+
+int main(int argc, char **argv)
+{
+    setvbuf(stdout, NULL, _IONBF, 0);
+    if (argc < 2) { printf("usage\nFAIL\n"); return 2; }
+    size_t n;
+    unsigned char *b = load(argv[1], &n);
+    Pak p;
+    CHECK(b && pak_parse(b, n, &p), "fake archive not parsed");
+    if (b) {
+        CHECK(pak_scene_groups(&p) == 40, "scene groups %d, want 40", pak_scene_groups(&p));
+        size_t len = 0;
+        const unsigned char *c = pak_shader(&p, UI[0], &len);
+        CHECK(c && len == 32 && !memcmp(c + 4, "NEWSHADER-UPDATE", 16), "updated interface VS not found by name");
+        c = pak_shader(&p, "VS[VS]$vcolor$VTEXCOORDS#0$TEXCOORDS#0$USE_VCOLOR", &len);
+        CHECK(c != NULL, "name case must not matter (the cache key is lower case)");
+        CHECK(!pak_shader(&p, UI[2], NULL), "entry with another name inside was accepted");
+        CHECK(!pak_shader(&p, UI[3], NULL), "compressed entry was accepted");
+        CHECK(!pak_shader(&p, "vs[VS]$NOPE", NULL), "missing name found");
+        CHECK(pak_find(&p, "shader/dx10/shader_constants.h") != NULL, "source file not found");
+        /* обрезанный архив: каждая длина — без падения */
+        for (size_t l = 0; l < n; l += 7) {
+            Pak q;
+            if (pak_parse(b, l, &q)) { pak_shader(&q, UI[0], NULL); pak_scene_groups(&q); pak_free(&q); }
+        }
+        pak_free(&p);
+        printf("fake archive (game after an update): new interface VS found by name, scene buffer 40 groups\n");
+    }
+    if (argc > 2) {
+        size_t rn;
+        unsigned char *r = load(argv[2], &rn);
+        Pak g;
+        if (!r) { printf("real archive %s not readable - skipped\n", argv[2]); }
+        else {
+            CHECK(pak_parse(r, rn, &g), "real archive not parsed");
+            CHECK(pak_scene_groups(&g) == 39, "real scene groups %d, want 39", pak_scene_groups(&g));
+            int found = 0, a = 0, bb = 0;
+            for (int i = 0; i < 9; i++) {
+                size_t len;
+                const unsigned char *c = pak_shader(&g, UI[i], &len);
+                if (!c) continue;
+                found++;
+                static const unsigned char s1[8] = {0xb7, 0xe2, 0x4d, 0x53, 0x5a, 0x3a, 0x5d, 0x52};
+                static const unsigned char s2[8] = {0xce, 0x3d, 0x9b, 0xfe, 0xa0, 0xd2, 0xc0, 0x76};
+                a += !memcmp(c + 4, s1, 8);
+                bb += !memcmp(c + 4, s2, 8);
+            }
+            printf("real archive: %d files, scene buffer %d groups, interface VS names %d/9 (checksum 1: %d, checksum 2: %d)\n", g.n,
+                   pak_scene_groups(&g), found, a, bb);
+            CHECK(found == 9 && a + bb == 9 && a && bb, "interface VS names do not give the two checksums of 16.11");
+            CHECK(pak_shader(&g, "postprocess/histogram[HistogramBinsCS]", NULL) &&
+                  pak_shader(&g, "postprocess/histogram[HistogramMaxAvg_Init_CS]", NULL), "exposure shaders not found by name");
+            CHECK(pak_shader(&g, "postprocess/dof/dof_blur[blurPS]", NULL), "DOF blur shader not found by name");
+            CHECK(pak_find(&g, "shader/dx10/postprocess/histogram.hlsl") != NULL, "exposure source not found");
+            pak_free(&g);
+            free(r);
+        }
+    }
+    free(b);
+    printf(fails ? "FAIL %d\n" : "PASS\n", fails);
+    return fails != 0;
+}

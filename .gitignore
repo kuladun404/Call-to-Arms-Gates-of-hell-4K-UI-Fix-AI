@@ -1,9 +1,4 @@
 out/
 __pycache__/
-.venv/
-*.log
-*.pdb
-*.lib
-ui4k_dump/
-ui4k.dump
-*.zip
+*.pyc
+ui4k.log

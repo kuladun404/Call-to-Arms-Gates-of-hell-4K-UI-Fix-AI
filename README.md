@@ -2,13 +2,16 @@
 
 **[Русский](#русский) · [English](#english)**
 
-Мод интерфейса для **Call to Arms – Gates of Hell: Ostfront** на мониторах 4K: интерфейс ровно ×2, как на 1080p, при честном рендере 3D в 3840×2160, с чёткими векторными шрифтами.
-A 4K interface fix for **Call to Arms – Gates of Hell: Ostfront**: the UI is exactly ×2 like on 1080p, the 3D is rendered at true 3840×2160, and the fonts are sharp vector redraws.
+Мод интерфейса для **Call to Arms – Gates of Hell: Ostfront** на мониторах 2K, 4K и 21:9: крупный интерфейс (×1.25…×2) и 3D-мир в разрешении, которое вы выберете.
+An interface mod for **Call to Arms – Gates of Hell: Ostfront** on 2K, 4K and 21:9 monitors: a large interface (×1.25…×2) and the 3D world at the resolution you choose.
+
+> **2.0 — бета / beta.** Новая версия, написана заново. Стабильная 1.0 (только 4K, ×2, с перерисованными шрифтами) — [v1.0](../../releases/tag/v1.0).
+> A new version, rewritten from scratch. The stable 1.0 (4K only, ×2, with redrawn fonts) is [v1.0](../../releases/tag/v1.0).
 
 > Мод и инструменты созданы с помощью ИИ (Claude) — отсюда «(AI)» в названии.
 > The mod and its tools were built with AI assistance (Claude) — hence "(AI)" in the name.
 
-**⬇ [Скачать готовый мод / Download the mod](../../releases/latest)** — файл `GoH-UI4K-x2-v1.0.zip`.
+**⬇ [2.0 beta](../../releases/tag/v2.0-beta)** · [1.0](../../releases/tag/v1.0) · **[Что изменилось / Changelog](CHANGELOG.md)**
 Также на / Also on: **[Nexus Mods](https://www.nexusmods.com/calltoarmsgatesofhellostfront/mods/29)** · **[Steam guide](https://steamcommunity.com/sharedfiles/filedetails/?id=3839336153)**
 
 ---
@@ -16,31 +19,32 @@ A 4K interface fix for **Call to Arms – Gates of Hell: Ostfront**: the UI is e
 ## Русский
 
 ### Что делает мод
-- Игра думает, что работает в 1920×1080, а прокси `d3d11.dll` рисует всё в 3840×2160.
-- Весь интерфейс (меню, лобби, бой, настройки, «Завоевание») ровно в 2 раза крупнее, без наложений и обрезанного текста.
-- 3D-сцена, вода, HBAO+ и постэффекты рисуются в настоящем 4K.
-- Все растровые шрифты игры перерисованы векторно в 4K строго в оригинальных размерах — без размытия от растягивания.
-- Заставка при запуске, курсор мыши и оверлей Steam — правильного размера.
+- Интерфейс крупнее в 1,25–2 раза на любом мониторе: 2K, 4K, 21:9.
+- 3D-мир — в родном разрешении монитора или меньше: меньший мир даёт больше кадров, интерфейс остаётся чётким.
+- Выбирается прямо в игре: «Параметры» → «Видео» → «Разрешение», строки вида `2560×1440  ×2` (мир × масштаб интерфейса).
+- Сглаживание MSAA, HDR, глубина резкости и затенение HBAO+ работают вместе с модом.
 - Файлы игры и exe не изменяются.
 
 ### Установка
-1. [Скачайте](../../releases/latest) `GoH-UI4K-x2-v1.0.zip` и распакуйте.
-2. Закройте игру. Скопируйте `d3d11.dll`, `ui4k.ini` и папку `ui4k_fonts` в `<папка игры>\binaries\x64\` (рядом с `call_to_arms.exe`).
-3. В игре выставьте разрешение **1920×1080**, полноэкранный режим.
+1. Скачайте архив из [выпуска 2.0 beta](../../releases/tag/v2.0-beta) и распакуйте.
+2. Закройте игру. Откройте папку игры: Steam → правой кнопкой по игре → Управление → Просмотреть локальные файлы.
+3. Перетащите в неё папку `binaries` из архива: `d3d11.dll` и `ui4k.ini` окажутся в `binaries\x64`, рядом с `call_to_arms.exe`.
+4. В игре: «Параметры» → «Видео» → «Разрешение», выберите строку и нажмите «Применить».
 
-Подробно — [install/УСТАНОВКА.txt](install/УСТАНОВКА.txt).
-**Удаление:** удалите `d3d11.dll`, `ui4k.ini`, `ui4k.log` и `ui4k_fonts` из `binaries\x64` и верните в игре 3840×2160.
+Если стояла 1.0 — просто замените файлы; папку `ui4k_fonts` можно удалить, 2.0 её не использует.
+**Удаление:** закройте игру и удалите из `binaries\x64` файлы `d3d11.dll`, `ui4k.ini`, `ui4k_labels.pak` и `ui4k.log`. Разрешение игра вернёт сама.
+Подробно — `README_RU.txt` в архиве.
 
 ### Сборка из исходников
-Нужны Python 3.11+ и `pip install ziglang numpy pillow scipy`.
+Нужен Python 3.11+ и `pip install ziglang` (компилятор C ставить не нужно).
 ```
-python build.py                       # DLL -> out\d3d11.dll
-python tools\make_fonts.py --clean --big   # шрифты -> out\ui4k_fonts (~3 мин на всех ядрах)
-python tools\check_fonts.py           # сверка каждой буквы с оригиналом
-python build.py --install             # поставить DLL и шрифты в игру (игра должна быть закрыта)
+python build.py             # DLL -> out\d3d11.dll
+python build.py --test      # тесты без игры
+python build.py --package   # архив для игроков -> out\package
+python build.py --install   # поставить в игру (игра должна быть закрыта)
 ```
 Папка игры ищется через Steam автоматически; иначе задайте `GOH_DIR=<папка игры>`.
-Как всё устроено — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (англ.).
+Как всё устроено — [docs/ARCHITECTURE_RU.md](docs/ARCHITECTURE_RU.md).
 
 ### Сетевая игра
 Мод не трогает exe и файлы, которые игра сверяет по сети, но официально это не проверялось — на ваше усмотрение.
@@ -50,56 +54,36 @@ python build.py --install             # поставить DLL и шрифты �
 ## English
 
 ### What it does
-- The game thinks it runs at 1920×1080; the `d3d11.dll` proxy renders everything at 3840×2160.
-- The whole interface (menus, lobby, battle, settings, Conquest) is exactly 2× larger, with no overlaps or clipped text.
-- The 3D scene, water, HBAO+ and post-effects render at true 4K.
-- All of the game's bitmap fonts are redrawn as vector outlines at 4K, at exactly the original size — no upscaling blur.
-- Startup splash, mouse cursor and Steam overlay have the right size.
-- No game files or the exe are modified.
+- The interface is 1.25 to 2 times larger on any monitor: 2K, 4K, 21:9.
+- The 3D world renders at the monitor's native resolution or lower: a smaller world gives more frames, the interface stays sharp.
+- Picked right in the game: Options → Video → Resolution, entries like `2560×1440  ×2` (world × interface scale).
+- MSAA anti-aliasing, HDR, depth of field and HBAO+ shading work together with the mod.
+- Game files and the exe are not changed.
 
-### Install
-1. [Download](../../releases/latest) `GoH-UI4K-x2-v1.0.zip` and unpack it.
-2. Close the game. Copy `d3d11.dll`, `ui4k.ini` and the `ui4k_fonts` folder into `<game folder>\binaries\x64\` (next to `call_to_arms.exe`).
-3. In the game, set the resolution to **1920×1080**, fullscreen.
+### Installing
+1. Download the archive from the [2.0 beta release](../../releases/tag/v2.0-beta) and unpack it.
+2. Close the game. Open the game folder: Steam → right-click the game → Manage → Browse local files.
+3. Drag the `binaries` folder from the archive into it: `d3d11.dll` and `ui4k.ini` end up in `binaries\x64`, next to `call_to_arms.exe`.
+4. In the game: Options → Video → Resolution, pick an entry and press Apply.
 
-Details: [install/INSTALL_EN.txt](install/INSTALL_EN.txt).
-**Uninstall:** delete `d3d11.dll`, `ui4k.ini`, `ui4k.log` and `ui4k_fonts` from `binaries\x64` and set the game back to 3840×2160.
+Coming from 1.0: just replace the files; the `ui4k_fonts` folder can be deleted, 2.0 does not use it.
+**Removing:** close the game and delete `d3d11.dll`, `ui4k.ini`, `ui4k_labels.pak` and `ui4k.log` from `binaries\x64`. The game sets its resolution back by itself.
+Details: `README_EN.txt` in the archive.
 
-### Build from source
-Python 3.11+ and `pip install ziglang numpy pillow scipy`.
+### Building from source
+Python 3.11+ and `pip install ziglang` (no C compiler needed).
 ```
-python build.py                       # DLL -> out\d3d11.dll
-python tools\make_fonts.py --clean --big   # fonts -> out\ui4k_fonts (~3 min on all cores)
-python tools\check_fonts.py           # compares every glyph with the original
-python build.py --install             # install DLL and fonts into the game (game must be closed)
+python build.py             # DLL -> out\d3d11.dll
+python build.py --test      # tests without the game
+python build.py --package   # player archive -> out\package
+python build.py --install   # install into the game (the game must be closed)
 ```
 The game folder is found through Steam; otherwise set `GOH_DIR=<game folder>`.
-How it works: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+How it works: [docs/ARCHITECTURE_RU.md](docs/ARCHITECTURE_RU.md) (in Russian).
 
 ### Multiplayer
-The mod leaves the exe and the files the game checks online untouched, but this has not been officially verified — use at your own discretion.
+The mod does not touch the exe or the files the game checks online, but this has not been officially verified — use at your discretion.
 
 ---
 
-## Virus scan / Проверка на вирусы
-
-The only executable file in the mod is `d3d11.dll`; `ui4k.ini` is text and `ui4k_fonts` is raw image data.
-Единственный исполняемый файл мода — `d3d11.dll`; `ui4k.ini` — текст, `ui4k_fonts` — данные изображений.
-
-| File / Файл | SHA-256 | VirusTotal |
-|---|---|---|
-| `GoH-UI4K-x2-v1.0.zip` (release) | `4502ca4a6afa7c49a79a42136a2d10619a6627c4eab97b60e9305adddbddf7d0` | [0 / 68 — clean](https://www.virustotal.com/gui/file/4502ca4a6afa7c49a79a42136a2d10619a6627c4eab97b60e9305adddbddf7d0) |
-| `d3d11.dll` (inside the zip) | `1cb784245c0d943e5fea6cfc107bea89768de8768c8b91234770b683a41d0f1a` | [0 / 71 — clean](https://www.virustotal.com/gui/file/1cb784245c0d943e5fea6cfc107bea89768de8768c8b91234770b683a41d0f1a) |
-
-- Nexus Mods virus scan: **Safe to use** — [mod page](https://www.nexusmods.com/calltoarmsgatesofhellostfront/mods/29).
-- Results as of 14 Nov 2026. Behaviour tags like "detect-debug-environment" are normal for a d3d11 proxy (it loads the system `d3d11.dll` and hooks its functions); the full source is in `src/`.
-- Verify your download / проверить свой файл (PowerShell):
-  ```
-  Get-FileHash .\GoH-UI4K-x2-v1.0.zip -Algorithm SHA256
-  ```
-
-## Licenses / Лицензии
-- Code (`src/`, `build.py`, `tools/*.py`): [MIT](LICENSE).
-- Replacement fonts in `tools/fonts/`: their own licenses (SIL OFL 1.1, Apache 2.0, GUST) — see [tools/fonts/README.md](tools/fonts/README.md).
-- The prebuilt `ui4k_fonts` in the release are redrawn from the game's own font atlases (and Arial outlines for the Arial-based fonts). Call to Arms – Gates of Hell and its assets belong to Barbedwire Studios / Digitalmindsoft; Arial belongs to Monotype/Microsoft. This is an unofficial fan mod, not affiliated with them.
-- Готовые `ui4k_fonts` в релизе перерисованы из шрифтовых атласов игры (и контуров Arial). Игра и её ресурсы принадлежат Barbedwire Studios / Digitalmindsoft, Arial — Monotype/Microsoft. Это неофициальный фанатский мод.
+Unofficial fan mod. The game and its assets belong to Barbedwire Studios / Digitalmindsoft. License: MIT.
