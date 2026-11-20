@@ -12,6 +12,9 @@
 > Мод и инструменты созданы с помощью ИИ (Claude) — отсюда «(AI)» в названии.
 > The mod and its tools were built with AI assistance (Claude) — hence "(AI)" in the name.
 
+> ⚠️ **На свой страх и риск.** Это неофициальный фанатский мод, разработчики игры его не делали и не поддерживают. Если что-то пойдёт не так — просто удалите файлы мода.
+> ⚠️ **Use at your own risk.** This is an unofficial fan mod, not made or supported by the game's developers. If something goes wrong, just delete the mod's files.
+
 ---
 
 ## Как это выглядит / How it looks
