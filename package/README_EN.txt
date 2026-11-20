@@ -6,7 +6,8 @@ https://github.com/kuladun404/Call-to-Arms-Gates-of-hell-4K-UI-Fix-AI
 WHAT IT DOES
 
 On 2K, 4K and ultrawide (21:9) monitors the game's interface is small. The mod enlarges it
-(1.25 to 2 times) and renders the 3D world at the resolution you choose. It does not change any game files.
+(1.25 to 2 times) and renders the 3D world at the resolution you choose. Interface text is sharp:
+letters are drawn at high resolution instead of being stretched. It does not change any game files.
 
 
 REQUIREMENTS
@@ -22,10 +23,10 @@ INSTALLING
 2. Open the game folder: Steam → Library → right-click the game → Manage → Browse local files.
    The folder "Call to Arms - Gates of Hell" opens.
 3. Drag the binaries folder from this archive into it. Windows merges it with the game's folder,
-   and d3d11.dll and ui4k.ini end up in binaries\x64, next to call_to_arms.exe.
-   If Windows asks whether to replace files, say yes.
+   and d3d11.dll, ui4k.ini, ui4k_fonts2.dat and ui4k_fonts4.dat end up in binaries\x64, next to
+   call_to_arms.exe. If Windows asks whether to replace files, say yes.
 
-You can also do it by hand: put d3d11.dll and ui4k.ini into the game's binaries\x64 folder.
+You can also do it by hand: put these four files into the game's binaries\x64 folder.
 
 If binaries\x64 already has another d3d11.dll (ReShade, for example), move it somewhere else:
 it will not work together with this mod.
@@ -55,20 +56,23 @@ Pick an entry and press Apply.
 SETTINGS
 
 The file ui4k.ini in binaries\x64 describes every setting. Usually nothing needs changing.
-To turn the mod off without removing it: enabled=0.
+- To turn the mod off without removing it: enabled=0.
+- The game's letters instead of the sharp ones: fonts=0.
+- The scale can be changed right in the game: windows, 3D views and item icons are redrawn by themselves.
 
 
 UPDATING
 
 Close the game and drag the binaries folder from the new archive in the same way as when installing,
 replacing the files. If you changed ui4k.ini and want to keep your settings, do not replace it.
+From 2.0 beta: replace everything in the archive; the letter files ui4k_fonts2.dat and ui4k_fonts4.dat are new.
 
 
 REMOVING
 
 1. Close the game.
-2. Delete d3d11.dll, ui4k.ini, ui4k_labels.pak and ui4k.log (and ui4k.2.log and the like, if any)
-   from binaries\x64.
+2. Delete d3d11.dll, ui4k.ini, ui4k_fonts2.dat, ui4k_fonts4.dat, ui4k_labels.pak and ui4k.log
+   (and ui4k.2.log and the like, if any) from binaries\x64.
 3. If the folder %LOCALAPPDATA%\ui4k exists, delete it too: the mod keeps the entry labels there
    when it cannot write into the game folder.
 

@@ -48,6 +48,12 @@ int main(int argc, char **argv)
     CHECK(b && pak_parse(b, n, &p), "fake archive not parsed");
     if (b) {
         CHECK(pak_scene_groups(&p) == 40, "scene groups %d, want 40", pak_scene_groups(&p));
+        /* Э3: после обновления регистры переехали — места считаются заново по именам */
+        unsigned sl[16];
+        int names = 0, ns = pak_screen_slots(&p, sl, 16, &names, NULL);
+        CHECK(ns == 3 && names == 3 && sl[0] == 8 && sl[1] == 22 && sl[2] == 73,
+              "screen places by name in the updated archive: %d (%u %u %u), names %d", ns, ns > 0 ? sl[0] : 0,
+              ns > 1 ? sl[1] : 0, ns > 2 ? sl[2] : 0, names);
         size_t len = 0;
         const unsigned char *c = pak_shader(&p, UI[0], &len);
         CHECK(c && len == 32 && !memcmp(c + 4, "NEWSHADER-UPDATE", 16), "updated interface VS not found by name");
@@ -73,6 +79,20 @@ int main(int argc, char **argv)
         else {
             CHECK(pak_parse(r, rn, &g), "real archive not parsed");
             CHECK(pak_scene_groups(&g) == 39, "real scene groups %d, want 39", pak_scene_groups(&g));
+            unsigned rs[16];
+            unsigned char rx[16] = {0};
+            int rn2 = 0, rns = pak_screen_slots(&g, rs, 16, &rn2, rx);
+            static const unsigned want[] = {0, 4, 6, 12, 56, 70, 97, 150};
+            int same = rns == 8;
+            for (int i = 0; same && i < 8; i++) same = rs[i] == want[i];
+            printf("real archive: screen places of the scene buffer %d (names %d):", rns, rn2);
+            for (int i = 0; i < rns; i++) printf(" %u", rs[i]);
+            printf("\n");
+            CHECK(same && rn2 == 11, "real screen places = 0 4 6 12 56 70 97 150 from 11 names (18.11 game)");
+            /* 20.11: место 12 (центр экрана; в мировых проходах — позиция камеры) — только точное значение, прочие — с допуском */
+            int ex_ok = same;
+            for (int i = 0; ex_ok && i < 8; i++) ex_ok = rx[i] == (rs[i] == 12);
+            CHECK(ex_ok, "only place 12 (screen centre / camera position) asks for an exact value");
             int found = 0, a = 0, bb = 0;
             for (int i = 0; i < 9; i++) {
                 size_t len;

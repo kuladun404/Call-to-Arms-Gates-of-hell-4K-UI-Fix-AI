@@ -1,10 +1,11 @@
 /* F01: ui4k.ini рядом с DLL. */
 #include <string.h>
+#include <stdio.h>
 #include <shlobj.h>
 #include "common.h"
 #include "profile.h"
 
-Config g_cfg = {1, {2, 1}, 1, {156, 84}, 2, 0, 1, 1, 0, 0, 100, 0, {2, 1}, 1, 1, 1, {0}, 0, -1, 0, 0, 0, 0, -1, 0, 1, -1, 2, 1, 0, 0, 0, 0};
+Config g_cfg = {1, {2, 1}, 1, {156, 84}, 2, 0, 1, 1, 0, 0, 100, 0, {2, 1}, 1, 1, 1, {0}, 0, -1, 0, 0, 0, 0, -1, 0, 1, -1, 2, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, {{0}}, 0, 0};   /* ..., origin, cb_names, thick_lines, fonts, ui_refresh, keys */
 WCHAR g_dir[MAX_PATH];
 
 /* ревизия кода 4, п. 4: <папка DLL> + имя. Не помещается в MAX_PATH — пустая строка и 0 (файл просто не открывается) */
@@ -119,6 +120,16 @@ void config_load(HMODULE self)
     g_cfg.stretch_copy = ini_int(ini, L"stretch_copy", 1);
     g_cfg.fit_native = ini_int(ini, L"fit_native", 1);
     g_cfg.diag = ini_int(ini, L"diag", 0);
+    g_cfg.perf = ini_int(ini, L"perf", 0);               /* Э1: режим замеров (perf.c) */
+    g_cfg.perf_every = ini_int(ini, L"perf_every", 0);
+    g_cfg.origin = ini_int(ini, L"origin", 1);           /* Э2: кэши окон по происхождению */
+    g_cfg.cb_names = ini_int(ini, L"cb_names", 1);       /* Э3: экранные числа буфера сцены по именам */
+    g_cfg.thick_lines = ini_int(ini, L"thick_lines", 1); /* Э5: линии интерфейса под xk */
+    g_cfg.fonts = ini_int(ini, L"fonts", 1);             /* Э6: чёткие страницы шрифтов */
+    g_cfg.ui_refresh = ini_int(ini, L"ui_refresh", 1);   /* смена масштаба на ходу: кэши окон заново */
+    g_cfg.keys = ini_int(ini, L"keys", 0);               /* ревизия v3, п. 2: клавиши-переключатели мода */
+    if (g_cfg.keys) LOG("keys: Ctrl+F6 / F7 / F9 / F10 switch mod features (only while the game window is in front)");
+    if (g_cfg.perf) LOG("perf: measurement mode on - a \"perf\" line every %s", g_cfg.perf_every > 0 ? "few frames (perf_every)" : "5 s");
     g_cfg.lum_fix = ini_int(ini, L"lum_fix", 1);
     g_cfg.labels = ini_int(ini, L"labels", 1);
     GetPrivateProfileStringW(L"ui4k", L"test_profiles", L"", g_profiles, MAX_PATH, ini);
@@ -138,6 +149,7 @@ void config_load(HMODULE self)
     g_cfg.dpi_aware = ini_int(ini, L"dpi_aware", 1);
     g_cfg.hbao_radius = ini_int(ini, L"hbao_radius", -1);   /* -1 — номер по устройству буфера (cb.c) */
     g_cfg.dof_radius = ini_int(ini, L"dof_radius", 2);
+    g_cfg.box_step = ini_int(ini, L"box_step", 1);      /* Э8: шаг уменьшения иконок инвентаря в настоящих текселях */
     g_cfg.presets = ini_int(ini, L"presets", 1);
     g_cfg.all_monitors = ini_int(ini, L"all_monitors", 1);
     g_cfg.d3d_debug = ini_int(ini, L"d3d_debug", 0);
@@ -172,6 +184,9 @@ void config_load(HMODULE self)
         if (!g_cfg.render_w && (g_cfg.render < 25 || g_cfg.render > 200)) g_cfg.render = 100;
     }
     g_cfg.diag_at = ini_int(ini, L"diag_at", 0);
+    g_cfg.diag_ring = ini_int(ini, L"diag_ring", 0);   /* 20.11: «запись прошлого», МБ (diag.c) */
+    if (g_cfg.diag_ring > 4096) g_cfg.diag_ring = 4096;
+    if (g_cfg.diag_ring > 0) g_cfg.diag = 1;
     {   /* ui_vs=b7e24d535a3a5d52 — контрольная сумма DXBC (байты 4..11) ещё одного VS интерфейса */
         WCHAR hb[64];
         GetPrivateProfileStringW(L"ui4k", L"ui_vs", L"", hb, 64, ini);
@@ -187,6 +202,27 @@ void config_load(HMODULE self)
             g_cfg.ui_vs[i] = (BYTE)v;
         }
         g_cfg.has_ui_vs = ok;
+    }
+    {   /* diag_on=WxH — разведка: снимок начинается с создания кэша этого размера (то, что игра рисует один раз) */
+        WCHAR b[32];
+        unsigned w = 0, h = 0;
+        GetPrivateProfileStringW(L"ui4k", L"diag_on", L"", b, 32, ini);
+        if (swscanf(b, L"%ux%u", &w, &h) == 2 && w && h) { g_cfg.diag_on_w = w; g_cfg.diag_on_h = h; g_cfg.diag = 1; }
+    }
+    {   /* diag_stack=105x120,1024x1024 — разведка: кто в игре создаёт текстуры таких размеров (стек вызовов в лог) */
+        WCHAR b[256];
+        GetPrivateProfileStringW(L"ui4k", L"diag_stack", L"", b, 256, ini);
+        const WCHAR *p = b;
+        g_cfg.ndiag_stk = 0;
+        while (*p && g_cfg.ndiag_stk < 8) {
+            unsigned w = 0, h = 0;
+            if (swscanf(p, L"%ux%u", &w, &h) == 2 && w && h) {
+                g_cfg.diag_stk[g_cfg.ndiag_stk][0] = w; g_cfg.diag_stk[g_cfg.ndiag_stk][1] = h; g_cfg.ndiag_stk++;
+            }
+            while (*p && *p != L',') p++;
+            if (*p == L',') p++;
+        }
+        if (g_cfg.ndiag_stk) g_cfg.diag = 1;
     }
     if (g_cfg.diag_at) g_cfg.diag = 1;
     {

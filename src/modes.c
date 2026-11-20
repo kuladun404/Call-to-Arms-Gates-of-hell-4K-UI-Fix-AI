@@ -172,6 +172,7 @@ int preset_apply(UINT lw, UINT lh)
 {
     const Preset *p = preset_find(lw, lh);
     if (!p) return 0;
+    Ratio was = g_cfg.scale;
     if (!ratio_eq(p->k, g_cfg.scale) || !ratio_eq(p->scene, g_cfg.scene))
         LOG("preset %ux%u: interface %d/%d (%.3f), world %ux%u", lw, lh, p->k.num, p->k.den, (double)p->k.num / p->k.den,
             p->rw, p->rh);
@@ -184,7 +185,30 @@ int preset_apply(UINT lw, UINT lh)
         g_cfg.scene = p->k;
         LOG("preset %ux%u: safe mode (MSAA x%ld) - world at interface size instead of %ux%u", lw, lh, (long)g_cfg.game_aa, p->rw, p->rh);
     }
+    views_scale_changed(was, g_cfg.scale);   /* Э9: на ходу — виды 3D игры и иконки предметов заново, в новом масштабе */
     return 1;
+}
+
+/* Реверс 19.11 (eDeviceScreen.cpp): 0x4d1de0 строит список разрешений игры — режимы не меньше 1360x768, по возрастанию;
+ * 0x4cfaa0 («screen:create», сразу после создания устройства) берёт его ПЕРВУЮ строку — «OnTargetSize», «SetResolution:
+ * RESET». Строку профиля (options.set {mode}) игра применяет позже (ResizeTarget, ~3 с). Без мода первая строка — 1360x768
+ * (окно запуска из реверса), с нашими строками — наименьшая строка (на 4K 1856x1044, x2.069). За эти секунды игра делает
+ * виды 3D (иконки инвентаря, 512 и 1024), атлас букв, кэши — и они оставались в масштабе этой строки до конца сессии.
+ * Поэтому первый swap chain процесса размером наименьшей строки берёт масштаб и мир строки профиля, если она есть в
+ * списке. 1 — так и сделано. */
+int preset_startup(UINT lw, UINT lh)
+{
+    static volatile LONG done;
+    if (InterlockedExchange(&done, 1) || !presets_on() || !g_nps) return 0;
+    UINT pw, ph;
+    if (!config_profile_mode(&pw, &ph) || (pw == lw && ph == lh)) return 0;
+    int least = 0;   /* наименьшая строка — как сортирует игра (по площади); строки-переходы на другие мониторы тоже в списке */
+    for (int i = 1; i < g_nps; i++)
+        if ((ULONGLONG)g_ps[i].lw * g_ps[i].lh < (ULONGLONG)g_ps[least].lw * g_ps[least].lh) least = i;
+    if (g_ps[least].lw != lw || g_ps[least].lh != lh || !preset_find(pw, ph)) return 0;
+    LOG("preset %ux%u at start: the game opens on the first entry of its list (eDeviceScreen) - interface and world of the "
+        "profile entry %ux%u, which it applies next", lw, lh, pw, ph);
+    return preset_apply(pw, ph);
 }
 
 /* состояние MSAA сменилось — мир текущей строки заново (со строками списка или с ключом render) */
@@ -302,7 +326,10 @@ static int rows_of(int mi, Preset *out, int cap, int *first, int *pnw, int *pnk)
             Preset p;
             ZeroMemory(&p, sizeof p);
             p.lw = (UINT)((long)pw / g * t); p.lh = (UINT)((long)ph / g * t);
-            if (p.lh < 720) continue;   /* меньше 720 строк игре не нужно */
+            /* Реверс 20.11 (Ghidra, Render::eDx11Device слот 12, 0x50ae80): игра берёт в свой список только режимы шириной
+             * >= 1360 И высотой >= 768 — меньшую строку она выбросит. Такой строки не делаем: иначе её подпись лишняя, а
+             * «наименьшая строка» preset_startup не совпала бы с первой строкой игры (1080p / 1440p: 1280x720) */
+            if (p.lw < 1360 || p.lh < 768) continue;
             int dup = 0;
             for (int q = 0; q < n; q++) dup |= out[q].lw == p.lw && out[q].lh == p.lh;
             if (dup) continue;
@@ -399,7 +426,11 @@ void presets_build(void)
     for (int i = 0; i < g_nps; i++)
         LOGV("  preset %ux%u: interface %d/%d world %ux%u label %.4f monitor %lux%lu", g_ps[i].lw, g_ps[i].lh, g_ps[i].k.num,
              g_ps[i].k.den, g_ps[i].rw, g_ps[i].rh, g_ps[i].lab, g_mon[g_ps[i].mon].pw, g_mon[g_ps[i].mon].ph);
-    if (first >= 0) { g_cfg.scale = g_ps[first].k; g_cfg.scene = g_ps[first].scene; }   /* до первой строки игры */
+    /* до первой строки игры — строка профиля (её игра и выберет; см. preset_startup), иначе родная */
+    UINT qw, qh;
+    const Preset *pp = config_profile_mode(&qw, &qh) ? preset_find(qw, qh) : NULL;
+    if (pp) { g_cfg.scale = pp->k; g_cfg.scene = pp->scene; }
+    else if (first >= 0) { g_cfg.scale = g_ps[first].k; g_cfg.scene = g_ps[first].scene; }
 }
 
 /* монитор по имени устройства (\\.\DISPLAY2); NULL — основной; -1 — монитора без строк */

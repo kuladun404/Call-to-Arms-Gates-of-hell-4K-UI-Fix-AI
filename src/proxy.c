@@ -137,6 +137,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID res)
         vp_install();
         cb_install();
         copy_install();
+        fontpages_install();
         sc_install_iat();
         input_install();
         cursor_install();

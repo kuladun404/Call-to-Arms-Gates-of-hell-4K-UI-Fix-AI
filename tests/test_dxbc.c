@@ -84,6 +84,29 @@ static void case_ok(const char *prof, int slot)
     ID3D10Blob_Release(b);
 }
 
+/* Э8: флаг «шейдер читает» — раскладка postprocess/copy.hlsl игры: в BoxRescalePS (без MSAA) src_size объявлен, но не
+ * читается, one_pixel читается */
+static void case_used(void)
+{
+    static const char *src =
+        "cbuffer data1 : register(b0) { float2 src_size : packoffset(c1.x); float2 one_pixel : packoffset(c1.z);"
+        " float4 color_modulation : packoffset(c2); }"
+        "Texture2D baseTexture : register(t0); SamplerState s : register(s0);"
+        "float4 main(float4 p : SV_Position, float2 uv : TEXCOORD0) : SV_Target"
+        "{ return (baseTexture.Sample(s, uv) + baseTexture.Sample(s, uv + one_pixel)) / 2; }";
+    ID3DBlob *b = compile(src, "ps_5_0");
+    CHECK(b, "copy layout: not compiled");
+    if (!b) return;
+    const void *p = ID3D10Blob_GetBufferPointer(b);
+    size_t n = ID3D10Blob_GetBufferSize(b);
+    DxbcVar s = {0}, o = {0};
+    CHECK(dxbc_find_var(p, n, "src_size", &s) && s.offset == 16 && s.size == 8 && !s.used, "src_size: found %u used %u", s.offset, s.used);
+    CHECK(dxbc_find_var(p, n, "one_pixel", &o) && o.offset == 24 && o.size == 8 && o.used, "one_pixel: offset %u used %u", o.offset, o.used);
+    CHECK(dxbc_find_binding(p, n, "baseTexture") == 0, "baseTexture register");
+    printf("copy layout: src_size float[%u] used %u, one_pixel float[%u] used %u\n", s.offset / 4, s.used, o.offset / 4, o.used);
+    ID3D10Blob_Release(b);
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -94,6 +117,7 @@ int main(void)
     case_ok("ps_5_0", 0);
     case_ok("ps_4_0", 0);
     case_ok("ps_5_0", 3);
+    case_used();
 
     char src[1024];
     snprintf(src, sizeof src, DOF, 0);

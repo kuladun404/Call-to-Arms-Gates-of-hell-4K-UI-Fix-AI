@@ -244,6 +244,19 @@ static BOOL WINAPI hk_EnumDisplaySettingsW(LPCWSTR dev, DWORD mode, DEVMODEW *dm
     return b;
 }
 
+/* Ревизия v3, п. 2: клавиши мода — Ctrl+F6/F7/F9/F10 (сравнение «с правкой / без»). У игры F6–F11 — бойцы отряда, F6/F7 —
+ * «атака по земле» / «рукопашная» (keys.set): с Ctrl в бою они переключали бы мод незаметно, а GetAsyncKeyState видит
+ * клавиатуру и тогда, когда впереди другая программа. Поэтому — только с keys=1 (диагностика diag=1 — сама по себе
+ * включённая разведка: force) и только когда впереди окно этого процесса. */
+int ui4k_hotkey(int vk, int force)
+{
+    if (!force && !g_cfg.keys) return 0;
+    HWND fg = GetForegroundWindow();
+    DWORD pid = 0;
+    if (!fg || !GetWindowThreadProcessId(fg, &pid) || pid != GetCurrentProcessId()) return 0;
+    return (GetAsyncKeyState(VK_CONTROL) & 0x8000) && (GetAsyncKeyState(vk) & 0x8000);
+}
+
 void input_install(void)
 {
     if (ratio_is_one(K) && !presets_on()) return;

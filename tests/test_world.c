@@ -84,9 +84,18 @@ int main(int argc, char **argv)
     int hdr0 = msaa || (argc > 2 && !strcmp(argv[2], "hdr0"));   /* HDR выключен в настройках игры: всё с первого кадра */
     int nopresets = argc > 2 && !strcmp(argv[2], "nopresets");   /* С4: мир задан ключом render, строк списка нет */
     int rsv = msaa || (argc > 2 && !strcmp(argv[2], "resolve"));  /* экран читается сведением выборок, как в игре */
+    int perf = argc > 2 && !strcmp(argv[2], "perf");   /* Э1: режим замеров; в кадре 1 интерфейс берёт кэш 16x16 (x1) */
+    /* вердикт 19.11, п. 6: presets=0 и мир = экран — линии всё равно толстые (метка VS интерфейса без строк списка) */
+    int nosplit = argc > 2 && !strcmp(argv[2], "lines_nopre");
+    int lines = argc > 2 && (!strcmp(argv[2], "lines") || nosplit);   /* Э5: линия интерфейса под x1.5 — три рисования */
+    int lines_off = argc > 2 && !strcmp(argv[2], "lines_off");  /* Э5: thick_lines=0 — одно */
+    ID3D11Texture2D *small = NULL;           /* Э1: кэш окна 16x16 и его вид */
+    ID3D11ShaderResourceView *small_v = NULL;
+    ID3D11Query *pq = NULL;                  /* Э5: счётчик примитивов линии */
+    ID3D11SamplerState *point = NULL;
     fprintf(ini, "[ui4k]\ngame_hdr=%d\ngame_aa=%d\nmsaa_safe=%d\nenabled=1\nall_monitors=0\nscale=1.5\nlog=2\nui_vs=%02x%02x%02x%02x%02x%02x%02x%02x\n%s",
             hdr0 ? 0 : 1, msaa && !live ? 4 : 0, safe ? 1 : 0, h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7],
-            nopresets ? "presets=0\nfit_native=0\nrender=50\n" : "");
+            nopresets ? "presets=0\nfit_native=0\nrender=50\n" : nosplit ? "presets=0\nfit_native=0\n" : perf ? "perf=1\nperf_every=2\n" : lines_off ? "thick_lines=0\n" : "");
     fclose(ini);
 
     snprintf(path, sizeof path, "%s\\d3d11.dll", dir);
@@ -106,6 +115,7 @@ int main(int argc, char **argv)
         }
     }
     if (nopresets) { lw = 1280; lh = 720; rw = 960; rh = 540; }   /* x1.5, мир 50%: 1920x1080 -> 960x540 */
+    if (nosplit) { lw = 1280; lh = 720; rw = 1280; rh = 720; }    /* x1.5, мир = экран: своей цели мира нет */
     CHECK(lw && rw, "a preset with a smaller world (monitor %ux%u)", mw, mh);
     if (fails) { printf("FAIL %d\n", fails); return 1; }
     printf("preset %ux%u, world %ux%u, monitor %ux%u\n", lw, lh, rw, rh, mw, mh);
@@ -178,6 +188,19 @@ int main(int argc, char **argv)
                                D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, 0, 0};
     ID3D11Device_CreateTexture2D(dev, &gd, NULL, &glass);
     if (ms) ID3D11Device_CreateTexture2D(dev, &gd, NULL, &flat);   /* сведённый экран — читать точки */
+    /* Э1: квадратный кэш окна 16x16 — мод его не увеличивает; перепись должна найти его в цели xk */
+    if (perf && !point) {   /* кэш окна выводится точечной выборкой */
+        D3D11_SAMPLER_DESC pd = {D3D11_FILTER_MIN_MAG_MIP_POINT, D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_TEXTURE_ADDRESS_CLAMP,
+                                 D3D11_TEXTURE_ADDRESS_CLAMP, 0, 1, D3D11_COMPARISON_NEVER, {0, 0, 0, 0}, 0, D3D11_FLOAT32_MAX};
+        ID3D11Device_CreateSamplerState(dev, &pd, &point);
+    }
+    if (perf && !small) {
+        D3D11_TEXTURE2D_DESC sd = {16, 16, 1, 1, DXGI_FORMAT_B8G8R8A8_UNORM, {1, 0}, D3D11_USAGE_DEFAULT,
+                                   D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, 0, 0};
+        ID3D11Device_CreateTexture2D(dev, &sd, NULL, &small);
+        if (small) ID3D11Device_CreateShaderResourceView(dev, (ID3D11Resource *)small, NULL, &small_v);
+        CHECK(small_v, "16x16 cache texture");
+    }
 /* копия экрана: с MSAA игра сводит выборки, без него копирует */
 #define SCREEN_TO(t) do { if (rsv || ms) ID3D11DeviceContext_ResolveSubresource(ctx, (ID3D11Resource *)(t), 0, (ID3D11Resource *)bb, 0, \
                                                                          DXGI_FORMAT_B8G8R8A8_UNORM); \
@@ -204,7 +227,9 @@ int main(int argc, char **argv)
             ID3D11DeviceContext_OMSetDepthStencilState(ctx, zoff, 0);
             ID3D11DeviceContext_VSSetShader(ctx, vsu, NULL, 0);
             ID3D11DeviceContext_PSSetShader(ctx, psr, NULL, 0);
+            if (small_v && frame == 1) { ID3D11DeviceContext_PSSetShaderResources(ctx, 0, 1, &small_v); ID3D11DeviceContext_PSSetSamplers(ctx, 0, 1, &point); }
             ID3D11DeviceContext_Draw(ctx, 6, 0);
+            if (small_v && frame == 1) { ID3D11ShaderResourceView *nv = NULL; ID3D11SamplerState *ns = NULL; ID3D11DeviceContext_PSSetShaderResources(ctx, 0, 1, &nv); ID3D11DeviceContext_PSSetSamplers(ctx, 0, 1, &ns); }
             SCREEN_TO(glass);
         }
         if (frame >= 2) {
@@ -212,6 +237,19 @@ int main(int argc, char **argv)
             ID3D11DeviceContext_VSSetShader(ctx, vsu, NULL, 0);
             ID3D11DeviceContext_PSSetShader(ctx, psg, NULL, 0);
             ID3D11DeviceContext_Draw(ctx, 6, 0);   /* интерфейс */
+            if ((lines || lines_off) && frame == 2 && pass == 0) {   /* Э5: рамка миникарты — LineStrip интерфейса */
+                D3D11_QUERY_DESC qd = {D3D11_QUERY_PIPELINE_STATISTICS, 0};
+                if (!pq) ID3D11Device_CreateQuery(dev, &qd, &pq);
+                ID3D11DeviceContext_IASetPrimitiveTopology(ctx, D3D11_PRIMITIVE_TOPOLOGY_LINESTRIP);
+                ID3D11DeviceContext_Begin(ctx, (ID3D11Asynchronous *)pq);
+                ID3D11DeviceContext_Draw(ctx, 2, 3);   /* вертикальная линия по x = 0 (граница четверти) */
+                ID3D11DeviceContext_End(ctx, (ID3D11Asynchronous *)pq);
+                ID3D11DeviceContext_IASetPrimitiveTopology(ctx, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+                D3D11_VIEWPORT gv;
+                UINT gn = 1;
+                ID3D11DeviceContext_RSGetViewports(ctx, &gn, &gv);
+                CHECK(gn == 1 && gv.Width == vp.Width && gv.TopLeftX == vp.TopLeftX, "viewport the game set is back after the line");
+            }
             /* плашка: копия экрана уже с интерфейсом в картинку размера мира — растянуть весь экран, не угол */
             if (frame == 2 || frame == 4) SCREEN_TO(glass);
             if (ms) SCREEN_TO(flat);
@@ -244,7 +282,41 @@ int main(int argc, char **argv)
         IDXGISwapChain_Present(sc, 0, 0);
     }
   }
+    if (lines || lines_off) {
+        D3D11_QUERY_DATA_PIPELINE_STATISTICS ps = {0};
+        HRESULT qh = S_FALSE;
+        for (int i = 0; pq && i < 1000 && qh == S_FALSE; i++) qh = ID3D11DeviceContext_GetData(ctx, (ID3D11Asynchronous *)pq, &ps, sizeof ps, 0);
+        printf("line draw: %llu primitive(s)\n", (unsigned long long)ps.IAPrimitives);
+        CHECK(qh == S_OK && ps.IAPrimitives == (lines ? 3u : 1u), "interface line at x1.5: %llu primitives, want %u",
+              (unsigned long long)ps.IAPrimitives, lines ? 3u : 1u);
+    }
     read_log();
+    if (perf) {
+        /* Э1: строки «perf» каждые 2 кадра; метки видеокарты; перепись кадра 1 нашла кэш 16x16 в цели xk */
+        CHECK(strstr(g_log, "perf: measurement mode on"), "perf mode announced");
+        CHECK(strstr(g_log, "perf: GPU timestamps on"), "GPU timestamps created");
+        int lines = 0, gpu = 0, ui = 0, copy = 0;
+        for (const char *p = g_log; (p = strstr(p, "] perf ")) != NULL;) {
+            const char *e = strchr(p, '\n');
+            char line[1024];
+            size_t n = e ? (size_t)(e - p) : strlen(p);
+            if (n >= sizeof line) n = sizeof line - 1;
+            memcpy(line, p, n);
+            line[n] = 0;
+            lines++;
+            gpu |= strstr(line, "gpu frame (n 0)") == NULL;
+            ui |= strstr(line, "interface part (n 0)") == NULL;
+            copy |= strstr(line, "world copy (n 0)") == NULL;
+            p += n;
+        }
+        CHECK(lines >= 2, "perf lines every 2 frames: %d", lines);
+        CHECK(gpu, "GPU frame times measured");
+        CHECK(ui, "GPU time of the interface part measured");
+        CHECK(copy, "GPU time of the own world copy measured");
+        CHECK(strstr(g_log, "x1 caches into xk targets 1.0 per frame (16x16)"), "census found the 16x16 cache drawn into an xk target");
+        if (small_v) ID3D11ShaderResourceView_Release(small_v);
+        if (small) ID3D11Texture2D_Release(small);
+    }
     if (safe) {
         /* msaa_safe=1: MSAA без HDR на строке «мир меньше экрана» — мир в размере интерфейса, своей цели мира нет */
         CHECK(!strstr(g_log, "world: own target"), "safe mode: no own world target");
@@ -279,7 +351,8 @@ int main(int argc, char **argv)
         CHECK(strstr(g_log, "straight into the back buffer"), "noticed the world in the back buffer (HDR off)");
 
     snprintf(want, sizeof want, "world: own target %ux%u", rw, rh);
-    CHECK(strstr(g_log, want), "own world target of world size (%s)", want);
+    if (!nosplit) CHECK(strstr(g_log, want), "own world target of world size (%s)", want);
+    else CHECK(!strstr(g_log, "world: own target"), "world = screen: no own world target");
     if (msaa) {
         /* П7: с MSAA мир остаётся в размере строки — своя цель мира с теми же выборками, что экран и глубина игры */
         CHECK(!strstr(g_log, "safe mode"), "no safe mode: the world keeps the size of the entry with MSAA");
@@ -303,8 +376,10 @@ int main(int argc, char **argv)
         CHECK(strstr(g_log, "MSAA x4 is on in the game settings"), "MSAA taken from the game settings");
     if (flat) ID3D11Texture2D_Release(flat);
     CHECK(strstr(g_log, "world: interface vertex shader"), "interface VS recognised by checksum");
-    CHECK(strstr(g_log, "interface after the last screen read"), "switch to the interface only after the last screen read");
-    CHECK(strstr(g_log, "interface, no 3D world in this frame"), "menu frame: interface straight away despite the learned screen read");
+    if (!nosplit) {   /* мир = экран: переходить к интерфейсу не из чего */
+        CHECK(strstr(g_log, "interface after the last screen read"), "switch to the interface only after the last screen read");
+        CHECK(strstr(g_log, "interface, no 3D world in this frame"), "menu frame: interface straight away despite the learned screen read");
+    }
     ID3D11RenderTargetView_Release(rtv);
     ID3D11Texture2D_Release(bb);
     ID3D11DeviceContext_Release(ctx);

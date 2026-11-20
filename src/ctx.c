@@ -16,6 +16,7 @@ static void *g_hooks[CTX_SLOTS];
 static INIT_ONCE g_once = INIT_ONCE_STATIC_INIT;
 static volatile LONG g_built;
 static SRWLOCK g_lock = SRWLOCK_INIT;   /* поиск обёртки и её последний Release */
+static CtxWrap *g_immw;                 /* обёртка непосредственного контекста (под g_lock; без своей ссылки) */
 
 int ctx_hook(size_t off, void *fn, const char *name)
 {
@@ -47,7 +48,10 @@ static ULONG STDMETHODCALLTYPE w_Release(ID3D11DeviceContext *c)
     CtxWrap *w = CTXW(c);
     AcquireSRWLockExclusive(&g_lock);
     LONG r = InterlockedDecrement(&w->ref);
-    if (r == 0) ID3D11DeviceContext_SetPrivateData(w->real, &GUID_CTXWRAP, 0, NULL);
+    if (r == 0) {
+        ID3D11DeviceContext_SetPrivateData(w->real, &GUID_CTXWRAP, 0, NULL);
+        if (g_immw == w) g_immw = NULL;
+    }
     ReleaseSRWLockExclusive(&g_lock);
     if (r == 0) {
         LOGV("context wrapper %p freed (real %p)", w, w->real);
@@ -94,6 +98,41 @@ static BOOL CALLBACK build_vt(PINIT_ONCE o, PVOID p, PVOID *x)
     return TRUE;
 }
 
+/* Ф2 (ревизия 20.11): простые поля CtxState непосредственного контекста — до настоящего Present и обратно после */
+int ctx_present_save(CtxPlain *p)
+{
+    AcquireSRWLockExclusive(&g_lock);
+    CtxWrap *w = g_immw;
+    if (w) InterlockedIncrement(&w->ref);   /* обёртка не уйдёт до ctx_present_restore */
+    ReleaseSRWLockExclusive(&g_lock);
+    p->w = w;
+    if (!w) return 0;
+    const CtxState *s = &w->st;
+    p->rk = s->rk; p->nvp = s->nvp; p->nsc = s->nsc;
+    memcpy(p->vp, s->vp, sizeof p->vp);
+    memcpy(p->sc, s->sc, sizeof p->sc);
+    p->vs = s->vs; p->ps = s->ps; p->cs = s->cs;
+    p->vs_ui = s->vs_ui; p->zon = s->zon; p->hasdsv = s->hasdsv; p->ps_dof = s->ps_dof; p->ps_box = s->ps_box; p->cs_lum = s->cs_lum;
+    p->topo = s->topo;
+    p->fp_live = s->fp_live;
+    return 1;
+}
+
+void ctx_present_restore(const CtxPlain *p)
+{
+    CtxWrap *w = p->w;
+    if (!w) return;
+    CtxState *s = &w->st;
+    s->rk = p->rk; s->nvp = p->nvp; s->nsc = p->nsc;
+    memcpy(s->vp, p->vp, sizeof s->vp);
+    memcpy(s->sc, p->sc, sizeof s->sc);
+    s->vs = p->vs; s->ps = p->ps; s->cs = p->cs;
+    s->vs_ui = p->vs_ui; s->zon = p->zon; s->hasdsv = p->hasdsv; s->ps_dof = p->ps_dof; s->ps_box = p->ps_box; s->cs_lum = p->cs_lum;
+    s->topo = p->topo;
+    s->fp_live = p->fp_live;
+    w_Release((ID3D11DeviceContext *)w);
+}
+
 int ctx_is_wrap(const void *c)
 {
     return c && *(void *const *)c == (void *)g_vt;
@@ -131,6 +170,7 @@ ID3D11DeviceContext *ctx_wrap(ID3D11DeviceContext *real)
     w->type = ID3D11DeviceContext_GetType(real);
     w->st.zon = 1;   /* состояние глубины по умолчанию: тест включён */
     ID3D11DeviceContext_SetPrivateData(real, &GUID_CTXWRAP, sizeof w, &w);
+    if (w->type == D3D11_DEVICE_CONTEXT_IMMEDIATE) g_immw = w;
     ReleaseSRWLockExclusive(&g_lock);
     LOG("context %p wrapped as %p (%s)", real, w, w->type == D3D11_DEVICE_CONTEXT_IMMEDIATE ? "immediate" : "deferred");
     return (ID3D11DeviceContext *)w;

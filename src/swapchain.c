@@ -1,10 +1,15 @@
 /* F04: swapchain в физическом размере, игре — логический.
- * Путь игры: D3D11CreateDeviceAndSwapChain(1360x768 окно) -> SetFullscreenState -> ResizeTarget(режим) ->
- * ResizeBuffers(0,0). Логический размер берём из того, что задаёт игра; если она даёт 0 (размер окна) —
+ * Путь игры (реверс 18.11, шаг 16; всё — в оконном потоке, внутри оконной процедуры):
+ *  - запуск: D3D11CreateDeviceAndSwapChain(окно 1360x768, 1 буфер, оконный);
+ *  - полный экран: ResizeBuffers(2, 0x0) -> SetFullscreenState(TRUE) -> ResizeBuffers(0x0) -> ResizeTarget(режим);
+ *  - окно: ResizeBuffers(1) -> SetFullscreenState(FALSE) -> ResizeTarget(режим), окно — по custom_mode профиля;
+ *  - смена разрешения в полном экране: SetFullscreenState(TRUE) -> ResizeBuffers(2) -> ResizeTarget(режим).
+ * Логический размер берём из того, что задаёт игра; если она даёт 0 (размер окна) —
  * из физического через size_to_log, но уже известный логический не пересчитываем (screen_set_physical). */
 #include "common.h"
 
 volatile DWORD g_cdsc_tid;
+volatile DWORD g_present_tid;   /* поток, который сейчас внутри настоящего Present: его рисования — оверлеев (in_present) */
 
 static void place_window(IDXGISwapChain *sc, const char *why);   /* поток внутри D3D11CreateDeviceAndSwapChain: фабрика зовётся изнутри, desc уже ×k */
 
@@ -22,7 +27,7 @@ void sc_scale_desc(DXGI_SWAP_CHAIN_DESC *d)
             screen_set_physical((UINT)(r.right - r.left), (UINT)(r.bottom - r.top));
         return;
     }
-    preset_apply(w, h);   /* L8: строка списка игры -> масштаб и мир */
+    if (!preset_startup(w, h)) preset_apply(w, h);   /* L8: строка списка игры -> масштаб и мир (запуск — строка профиля) */
     place_window(NULL, "swap chain");   /* второй монитор: строка другого монитора — окно туда до полного экрана */
     screen_set_logical(w, h);
     screen_set_format(d->BufferDesc.Format);
@@ -34,14 +39,33 @@ static VtHook h_getbuf, h_getdesc, h_rb, h_rt, h_fs, h_f_csc, h_pr;
 typedef HRESULT(STDMETHODCALLTYPE *PFN_PR)(IDXGISwapChain *, UINT, UINT);
 static HRESULT STDMETHODCALLTYPE hk_Present(IDXGISwapChain *sc, UINT si, UINT f)
 {
+    if (!g_presented) InterlockedExchange(&g_presented, 1);   /* Э9: дальше смена масштаба — на ходу */
     copy_tick();       /* ревизия кода п. 5: запас временных текстур */
+    fontpages_tick();  /* Э6: свои страницы шрифтов, отпущенные игрой */
     if (g_cfg.d3d_debug) {   /* сообщения слоя отладки — в лог */
         ID3D11Device *d = NULL;
         if (SUCCEEDED(IDXGISwapChain_GetDevice(sc, &IID_ID3D11Device, (void **)&d)) && d) { d3dbg_drain(d); ID3D11Device_Release(d); }
     }
-    world_present();   /* мир без HDR: кадр без интерфейса — мир на экран; следующий кадр снова с подменой */
+    world_present();   /* мир без HDR: кадр без интерфейса — мир на экран */
     if (g_cfg.diag) diag_present();
-    return VT_GUARDED(VT_ORIG(sc, &h_pr, PFN_PR)(sc, si, f));
+    res_origin_key();   /* Э2: Ctrl+F7 */
+    cb_key();           /* Э3: Ctrl+F6 */
+    draw_key();         /* Э5: Ctrl+F9 */
+    if (g_cfg.perf) perf_present_pre(sc);   /* Э1: время кадра, метки видеокарты */
+    /* 19.11: внутри настоящего Present рисуют оверлеи (RivaTuner — счётчик FPS, Steam, Discord) через ту же обёртку
+     * контекста, а своё состояние ставят мимо неё (SwapDeviceContextState): для мода их рисование выглядит как
+     * интерфейс игры — режим замеров ставил по нему «начало интерфейса» в самом начале кадра */
+    /* ревизия 20.11, Ф2: их цели, viewport и шейдеры ложатся в состояние обёртки, а настоящий контекст они возвращают мимо
+     * неё — после Present в обёртке снова то, что поставила игра */
+    CtxPlain keep;
+    int kept = ctx_present_save(&keep);
+    InterlockedExchange((volatile LONG *)&g_present_tid, (LONG)GetCurrentThreadId());
+    HRESULT hr = VT_GUARDED(VT_ORIG(sc, &h_pr, PFN_PR)(sc, si, f));
+    InterlockedExchange((volatile LONG *)&g_present_tid, 0);
+    if (kept) ctx_present_restore(&keep);
+    if (g_cfg.perf) perf_present_post();
+    world_frame_start();   /* следующий кадр снова с подменой — только после Present (снимки экрана оверлеями) */
+    return hr;
 }
 typedef HRESULT(STDMETHODCALLTYPE *PFN_GETBUF)(IDXGISwapChain *, UINT, REFIID, void **);
 typedef HRESULT(STDMETHODCALLTYPE *PFN_SCDESC)(IDXGISwapChain *, DXGI_SWAP_CHAIN_DESC *);

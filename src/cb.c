@@ -91,23 +91,70 @@ static void diag_vals(ID3D11DeviceContext *c, const char *what, const float *bef
 /* Устойчивость к обновлениям: буфер HBAO+ узнаётся по размеру, который создала сама библиотека (anchors.c), номер
  * радиуса — по устройству (R² и −1/R² следом, cb_hbao_radius_index); hbao_radius>0 в ui4k.ini — номер вручную, 0 — не
  * трогать. Радиус умножается на то же, на что изменилась высота кадра, если в буфере нашлась экранная пара. */
+/* номер RadiusToScreen в буфере HBAO+ из n чисел. 20.11: устройство буфера за игру не меняется — номер находится один раз
+ * (единственное подходящее место) и дальше держится; *ok — в этой записи на нём действительно радиус. Иначе в кадре, где
+ * угол обзора проходит ≈ 41°, подходят два места (cbfix.c) — и мигание. kn — размер буфера (−1: место занимается), ki —
+ * номер; у HBAO+ 16.11 — буфер на 84, на 8 — служебный, без радиуса. -1 — радиус ещё не нашёлся */
+static int hbao_r(const float *f, UINT n, int *ok)
+{
+    static volatile LONG kn[8], ki[8];
+    *ok = 0;
+    for (int k = 0; k < 8; k++) {
+        LONG v = kn[k];
+        if (v == (LONG)n) { *ok = cb_hbao_radius_at(f, n, (unsigned)ki[k]); return (int)ki[k]; }
+        if (v) continue;
+        int i = cb_hbao_radius_index(f, n);
+        if (i < 0) return -1;
+        *ok = 1;
+        if (InterlockedCompareExchange(&kn[k], -1, 0) != 0) continue;
+        InterlockedExchange(&ki[k], i);
+        InterlockedExchange(&kn[k], (LONG)n);
+        LOG("gamedata: HBAO+ shading radius found at float %d of the %u-float buffer (R2 and -1/R2 follow it) - kept from now on",
+            i, n);
+        return i;
+    }
+    int i = cb_hbao_radius_index(f, n);
+    *ok = i >= 0;
+    return i;
+}
+
 static int hbao_index(const float *f, UINT n)
 {
     if (!g_cfg.hbao_radius || !anchors_hbao(n)) return -1;
     if (g_cfg.hbao_radius > 0) return (UINT)g_cfg.hbao_radius < n ? g_cfg.hbao_radius : -1;
-    int i = cb_hbao_radius_index(f, n);
-    /* по строке на каждый размер буфера, где радиус нашёлся (у HBAO+ 16.11 — буфер на 84; на 8 — служебный, без него) */
-    static volatile LONG said[8];
-    if (i >= 0)
-        for (int k = 0; k < 8; k++) {
-            LONG v = said[k];
-            if (v == (LONG)n) break;
-            if (!v && !InterlockedCompareExchange(&said[k], (LONG)n, 0)) {
-                LOG("gamedata: HBAO+ shading radius found at float %d of the %u-float buffer (R2 and -1/R2 follow it)", i, n);
-                break;
-            }
-        }
-    return i;
+    int ok, i = hbao_r(f, n, &ok);
+    return ok ? i : -1;
+}
+
+/* Э3: буфер сцены — только пары в местах из имён переменных шейдеров игры.
+ * Ревизия 20.11, Ф1: буфер HBAO+ — только числа до радиуса. В структуре HBAO+ первыми идут 1/размер четверти и кадра
+ * ([4..7] у 16.11), за радиусом — мировые числа: позиция камеры [40..42], матрица с ней [64..79] (реверс, «Шейдеры»).
+ * Проверка всех чисел подряд удваивала бы камеру, оказавшуюся рядом с (1920, 1080), (960, 540) или (480, 270). Все числа —
+ * только пока радиус не нашёлся (служебный буфер HBAO+ на 8 чисел, другая версия библиотеки) */
+static int scene_fix(float *f, UINT n, long lw, long lh, long pw, long ph)
+{
+    int ns = 0;
+    const unsigned *at = anchors_screen_slots(&ns);
+    if (at && g_cfg.cb_names && n == (UINT)anchors_scene_floats())
+        return cb_fix_at_x(f, n, at, anchors_screen_exact(), ns, lw, lh, pw, ph);
+    if (anchors_hbao(n)) {
+        int ok, r = g_cfg.hbao_radius > 0 ? g_cfg.hbao_radius : hbao_r(f, n, &ok);
+        if (r > 1 && (UINT)r <= n) return cb_fix_floats(f, (UINT)r, lw, lh, pw, ph);
+    }
+    return cb_fix_floats(f, n, lw, lh, pw, ph);
+}
+
+void cb_key(void)
+{
+    static int was;
+    int ns = 0;
+    if (!anchors_screen_slots(&ns)) return;
+    int down = ui4k_hotkey(VK_F6, 0);
+    if (down && !was) {
+        LONG on = !InterlockedXor(&g_cfg.cb_names, 1);
+        LOG("cb: scene buffer - %s (Ctrl+F6)", on ? "named places only" : "every float checked (v2 way)");
+    }
+    was = down;
 }
 
 static int fix_r(float *f, UINT n, Ratio r)
@@ -116,7 +163,7 @@ static int fix_r(float *f, UINT n, Ratio r)
     int hb = hbao_index(f, n);
     long pw = s.pw, ph = s.ph;
     if (r.num && !ratio_eq(r, g_cfg.scale)) { pw = (long)to_phys(r, s.lw); ph = (long)to_phys(r, s.lh); }
-    int fixed = cb_fix_floats(f, n, s.lw, s.lh, pw, ph);
+    int fixed = scene_fix(f, n, s.lw, s.lh, pw, ph);
     if (hb >= 0 && fixed && s.lh) f[hb] *= (float)ph / (float)s.lh;
     return fixed;
 }
@@ -128,7 +175,7 @@ static int has_screen(const float *f, UINT n)
     float t[CB_TRKF];
     if (!s.lw || !s.lh || n > CB_TRKF) return 0;
     memcpy(t, f, n * sizeof(float));
-    return cb_fix_floats(t, n, s.lw, s.lh, s.lw * 2, s.lh * 2) > 0;
+    return scene_fix(t, n, s.lw, s.lh, s.lw * 2, s.lh * 2) > 0;
 }
 
 /* ---- F14/L8: логические копии CB с экранными константами, по контексту ---- */
@@ -140,6 +187,7 @@ void cb_ctx_forget(ID3D11DeviceContext *c)
     for (int i = 0; i < CB_TRK; i++)
         if (s->trk[i].r) { ID3D11Resource_Release(s->trk[i].r); s->trk[i].r = NULL; }
     dof_ctx_forget(c);
+    box_ctx_forget(c);
 }
 
 /* f — логическое содержимое; правит его под коэффициент цели контекста и запоминает копию этого контекста */
@@ -172,9 +220,10 @@ static void fix(ID3D11DeviceContext *c, ID3D11Resource *r, float *f, UINT n)
     float ldim = dof_ldim(f, n);
     fix_r(f, n, cur);
     dof_written(c, r, f, n, ldim);   /* Г4: что ушло в буфер — радиус размытия правится при рисовании */
+    box_written(c, r, f, n);         /* Э8: и шаг уменьшения шейдера копирования */
     if (g_cap && n <= CB_TRKF) {
         diag_vals(c, n == 156 ? "  CB156 fix" : "  CB fix", before, f, n, cur);
-        int hb = anchors_hbao(n) ? cb_hbao_radius_index(before, n) : -1;
+        int hb = hbao_index(before, n);
         if (hb >= 0) diag_note(c, "  CB%u HBAO+ radius [%d] %g -> %g", n, hb, before[hb], f[hb]);
         char b[4096];   /* всё содержимое (логическое): искать числа, меняющиеся от кадра к кадру */
         int p = snprintf(b, sizeof b, "  CB%u raw:", n);
@@ -209,6 +258,7 @@ void cb_pre_draw(ID3D11DeviceContext *c)
             ID3D11DeviceContext_UpdateSubresource(RC(c), r, 0, NULL, tmp, 0, 0);
         }
         dof_written(c, r, tmp, n, dof_ldim(s->trk[i].log, n));
+        box_written(c, r, tmp, n);
     }
 }
 
@@ -219,7 +269,7 @@ static HRESULT STDMETHODCALLTYPE hk_Map(ID3D11DeviceContext *c, ID3D11Resource *
     UINT bytes;
     if (SUCCEEDED(hr) && m && m->pData &&
         (t == D3D11_MAP_WRITE_DISCARD || t == D3D11_MAP_WRITE || t == D3D11_MAP_WRITE_NO_OVERWRITE) && cb_size(r, &bytes) &&
-        (g_cfg.scan_cb || wanted(bytes / 4))) {
+        (g_cfg.scan_cb || wanted(bytes / 4) || g_cap)) {
         CtxState *s = &CTXW(c)->st;
         for (int i = 0; i < MAX_CBMAP; i++)
             if (!s->cbm[i].r) { s->cbm[i].r = r; s->cbm[i].p = (float *)m->pData; s->cbm[i].n = bytes / 4; break; }
@@ -236,7 +286,7 @@ static void STDMETHODCALLTYPE hk_Unmap(ID3D11DeviceContext *c, ID3D11Resource *r
             if (wanted(s->cbm[i].n)) {
                 if (g_cap) diag_note(c, "CB%u map %06x", s->cbm[i].n, (unsigned)((ULONG_PTR)r & 0xffffff));
                 fix(c, r, s->cbm[i].p, s->cbm[i].n);
-            }
+            } else if (g_cap) diag_cb_raw(c, r, s->cbm[i].p, s->cbm[i].n);   /* 20.11, снимок: прочие буферы */
             s->cbm[i].r = NULL;
             break;
         }
@@ -258,10 +308,20 @@ static inline void update(ID3D11DeviceContext *c, ID3D11Resource *r, UINT sub, c
         D3D11_RESOURCE_DIMENSION dim;
         ID3D11Resource_GetType(r, &dim);
         if (dim == D3D11_RESOURCE_DIMENSION_TEXTURE2D) {
+            fontpages_upload(c, r, sub, box, data, rp);   /* Э6: страница шрифта? — запомнить до копии в рабочую */
             /* В0: картинка игры логического размера в увеличенную текстуру — растянуть самим, не давать драйверу
              * читать за концом памяти игры */
             if (upload_prepare(r, sub, &box, &data, &rp, &dp, &pb, &heap, box && upload_quirk(c, r)) < 0) return;
-        } else if (dim == D3D11_RESOURCE_DIMENSION_BUFFER && !box && (g_cfg.ncbfix || g_cfg.scan_cb) && cb_size(r, &bytes)) {
+        } else if (dim == D3D11_RESOURCE_DIMENSION_BUFFER) {
+            /* ревизия v3, п. 4: описание буфера — одно на заливку (их ~2 000 за кадр, реверс) и только когда нужно */
+            int cbw = !box && (g_cfg.ncbfix || g_cfg.scan_cb), fpw = fontpages_vb_wanted(c), dgw = g_cap && !box;
+            D3D11_BUFFER_DESC bd = {0};
+            if (cbw || fpw || dgw) ID3D11Buffer_GetDesc((ID3D11Buffer *)r, &bd);
+            if (fpw) fontpages_vb_update(r, &bd, box, data);   /* Э6: копия вершин букв — до CB */
+            bytes = bd.ByteWidth;
+            /* 20.11, снимок: что игра пишет в прочие буферы констант — камера (сцена VS), положение объекта */
+            if (dgw && (bd.BindFlags & D3D11_BIND_CONSTANT_BUFFER) && !wanted(bytes / 4)) diag_cb_raw(c, r, (const float *)data, bytes / 4);
+            if (!cbw || !(bd.BindFlags & D3D11_BIND_CONSTANT_BUFFER)) goto pass;
             if (g_cfg.scan_cb) scan(r, (const float *)data, bytes / 4, "upd");
             if (bytes <= sizeof tmp && wanted(bytes / 4)) {
                 if (g_cap) diag_note(c, "CB%u update %06x", bytes / 4, (unsigned)((ULONG_PTR)r & 0xffffff));
@@ -271,6 +331,7 @@ static inline void update(ID3D11DeviceContext *c, ID3D11Resource *r, UINT sub, c
             }
         }
     }
+pass:
     /* вторая функция — слот ID3D11DeviceContext1 той же таблицы настоящего контекста (как у переходников обёртки) */
     if (one) ((PFN_UPD1)((ID3D11DeviceContext1 *)RC(c))->lpVtbl->UpdateSubresource1)(RC(c), r, sub, box, data, rp, dp, flags);
     else ORIGC(c, UpdateSubresource, PFN_UPD)(RC(c), r, sub, box, data, rp, dp);

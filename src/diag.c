@@ -2,6 +2,9 @@
  * (от Present до Present): каждое рисование/dispatch/очистка/копия с целями, текстурами, шейдером, сэмплером, viewport.
  * Цель — понять цепочку кадра: где кончается 3D-сцена, как попадает в back buffer, куда рисуется интерфейс.
  * diag_at=N — снимок сам на N-м Present (тесты).
+ * diag_on=WxH — снимок сам, когда игра создаёт кэш интерфейса этого логического размера (иконки инвентаря игра рисует
+ * один раз, при открытии окна — Ctrl+F11 их не застаёт). До 3 раз за запуск (например, до и после смены масштаба);
+ * 6 кадров с этого места.
  * Ресурс: id:WxH[*] fN — логический размер, * = увеличен модом, N = DXGI_FORMAT. Без diag=1 ничего не ставится. */
 #include <stdio.h>
 #include <stdarg.h>
@@ -12,6 +15,78 @@ volatile LONG g_cap;          /* 1 = идёт снимок */
 static volatile LONG g_frames; /* сколько Present осталось до конца снимка */
 static volatile LONG g_seq;    /* номер события */
 static volatile LONG g_presents; /* для diag_at */
+
+/* ---- 20.11: «запись прошлого» (diag_ring=МБ; «часть мира на краткое мгновение промигивает поверх основной картинки»).
+ * Мигание длится кадр-два, а снимок по Ctrl+F11 начинается после нажатия — уже без него. В этом режиме снимок идёт всё
+ * время, но строки уходят не в лог, а в кольцевой буфер в памяти (новые затирают самые старые); Ctrl+F11 (или diag_at=N —
+ * на N-м кадре, тесты) пишет буфер в ui4k_ring_N.txt рядом с DLL: последние секунды кадров до нажатия. Игра заметно
+ * медленнее (каждое рисование описывается текстом) — режим только для поиска ошибок. ---- */
+static char *g_ring;                /* NULL — режима нет, строки снимка идут в лог */
+static SIZE_T g_rsz;
+static ULONGLONG g_rpos;            /* сколько байт записано всего */
+static SRWLOCK g_rlk = SRWLOCK_INIT;
+static volatile LONG g_frame_no, g_dumps;
+
+static void ring_write(const char *p, SIZE_T n)
+{
+    while (n) {
+        SIZE_T off = (SIZE_T)(g_rpos % g_rsz), k = g_rsz - off < n ? g_rsz - off : n;
+        memcpy(g_ring + off, p, k);
+        g_rpos += k; p += k; n -= k;
+    }
+}
+
+/* строка снимка: в буфер (с номером потока) или в лог */
+static void emit(const char *line)
+{
+    if (!g_ring) { ui4k_log("%s", line); return; }
+    char h[24];
+    int k = snprintf(h, sizeof h, "[%lu] ", GetCurrentThreadId());
+    SIZE_T n = strlen(line);
+    AcquireSRWLockExclusive(&g_rlk);
+    ring_write(h, (SIZE_T)k);
+    ring_write(line, n);
+    ring_write("\n", 1);
+    ReleaseSRWLockExclusive(&g_rlk);
+}
+
+static void ring_dump(void)
+{
+    AcquireSRWLockExclusive(&g_rlk);
+    ULONGLONG pos = g_rpos;
+    SIZE_T n = pos < g_rsz ? (SIZE_T)pos : g_rsz;
+    char *tmp = (char *)HeapAlloc(GetProcessHeap(), 0, n ? n : 1);
+    if (tmp && pos <= g_rsz) memcpy(tmp, g_ring, n);
+    else if (tmp) {
+        SIZE_T off = (SIZE_T)(pos % g_rsz);
+        memcpy(tmp, g_ring + off, g_rsz - off);
+        memcpy(tmp + (g_rsz - off), g_ring, off);
+    }
+    ReleaseSRWLockExclusive(&g_rlk);
+    if (!tmp) { LOG("diag ring: no memory to write the record"); return; }
+    SIZE_T s = 0;
+    if (pos > g_rsz) { while (s < n && tmp[s] != '\n') s++; if (s < n) s++; }   /* самая старая строка обрезана — с следующей */
+    LONG k = InterlockedIncrement(&g_dumps);
+    WCHAR name[40], path[MAX_PATH];
+    swprintf(name, 40, L"ui4k_ring_%ld.txt", (long)k);
+    FILE *f = dir_file(path, name) ? _wfopen(path, L"wb") : NULL;
+    if (f) { fwrite(tmp + s, 1, n - s, f); fclose(f); }
+    HeapFree(GetProcessHeap(), 0, tmp);
+    LOG("diag ring: %.1f MB of the last frames (up to frame %ld) %s %ls (Ctrl+F11 #%ld)", (double)(n - s) / 1048576.0,
+        (long)g_frame_no, f ? "written to" : "could NOT be written to", name, (long)k);
+}
+
+static void ring_init(void)
+{
+    if (g_ring || g_cfg.diag_ring <= 0) return;
+    SIZE_T sz = (SIZE_T)g_cfg.diag_ring << 20;
+    g_ring = (char *)VirtualAlloc(NULL, sz, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!g_ring) { LOG("diag ring: %d MB not available - Ctrl+F11 snapshots as usual", g_cfg.diag_ring); return; }
+    g_rsz = sz;
+    InterlockedExchange(&g_cap, 1);   /* снимок идёт всё время — в буфер */
+    LOG("diag ring: the last %d MB of frames are kept in memory - Ctrl+F11 writes them to ui4k_ring_N.txt (the game is slower)",
+        g_cfg.diag_ring);
+}
 
 static const char *ctx_tag(ID3D11DeviceContext *c)
 {
@@ -188,6 +263,7 @@ static HRESULT STDMETHODCALLTYPE hk_CreateSamplerState(ID3D11Device *d, const D3
 
 void diag_hook_device(ID3D11Device *dev)
 {
+    ring_init();
     VT_PATCH(dev, ID3D11DeviceVtbl, CreateSamplerState, hk_CreateSamplerState, &h_css);
     VT_PATCH(dev, ID3D11DeviceVtbl, CreatePixelShader, hk_CreatePixelShader, &h_cps);
     VT_PATCH(dev, ID3D11DeviceVtbl, CreateComputeShader, hk_CreateComputeShader, &h_ccs);
@@ -228,7 +304,7 @@ void diag_draw(ID3D11DeviceContext *c, const char *what, UINT a, UINT b, int com
         AP(" ] srv=[");
         for (int i = 0; i < 6; i++) if (t[i]) { view_str((ID3D11View *)t[i], s, sizeof s); AP(" %d=%s", i, s); ID3D11ShaderResourceView_Release(t[i]); }
         AP(" ]");
-        ui4k_log("%s", line);
+        emit(line);
         return;
     }
     ID3D11RenderTargetView *rt[8] = {0};
@@ -303,32 +379,88 @@ void diag_draw(ID3D11DeviceContext *c, const char *what, UINT a, UINT b, int com
     UINT nv = 1;
     ID3D11DeviceContext_RSGetViewports(r, &nv, &v);   /* настоящий контекст — физический viewport */
     if (nv) AP(" vp=%.0f,%.0f %.0fx%.0f(phys)", v.TopLeftX, v.TopLeftY, v.Width, v.Height);
-    ui4k_log("%s", line);
+    D3D11_RECT sr;
+    UINT nsr = 1;
+    ID3D11DeviceContext_RSGetScissorRects(r, &nsr, &sr);   /* 20.11: ножницы — кусок мира не на своём месте */
+    if (nsr) AP(" sc=%ld,%ld-%ld,%ld", sr.left, sr.top, sr.right, sr.bottom);
+    emit(line);
 }
 
 void diag_copy(ID3D11DeviceContext *c, const char *what, ID3D11Resource *dst, ID3D11Resource *src)
 {
-    char a[96], b[96];
+    char a[96], b[96], line[300];
     res_str(dst, a, sizeof a);
     res_str(src, b, sizeof b);
-    ui4k_log("#%ld %s %s dst=%s src=%s", InterlockedIncrement(&g_seq), ctx_tag(c), what, a, b);
+    snprintf(line, sizeof line, "#%ld %s %s dst=%s src=%s", InterlockedIncrement(&g_seq), ctx_tag(c), what, a, b);
+    emit(line);
 }
 
 void diag_note(ID3D11DeviceContext *c, const char *fmt, ...)
 {
-    char line[4096];
+    char line[4096], out[4160];
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(line, sizeof line, fmt, ap);
     va_end(ap);
-    ui4k_log("#%ld %s %s", InterlockedIncrement(&g_seq), c ? ctx_tag(c) : "-", line);
+    snprintf(out, sizeof out, "#%ld %s %s", InterlockedIncrement(&g_seq), c ? ctx_tag(c) : "-", line);
+    emit(out);
+}
+
+/* 20.11: запись игры в прочий буфер констант (не тот, что правит мод). Сцена VS (232 числа, shader_constants.h игры):
+ * позиция камеры c2 и матрица вида c3..c6 — числа 8..27; остальные — первые 16 чисел (положение объекта, кости) */
+void diag_cb_raw(ID3D11DeviceContext *c, ID3D11Resource *r, const float *f, UINT n)
+{
+    if (!f || !n) return;
+    UINT from = n == 232 ? 8 : 0, to = n == 232 ? 28 : (n < 16 ? n : 16);
+    char b[600];
+    int p = snprintf(b, sizeof b, "CB%u raw %06x:", n, (unsigned)((ULONG_PTR)r & 0xffffff));
+    for (UINT i = from; i < to && p < (int)sizeof b - 16; i++) p += snprintf(b + p, sizeof b - p, " %.6g", f[i]);
+    diag_note(c, "%s", b);
+}
+
+/* стек вызовов здесь — адреса внутри exe (rva, «e...»), чужие модули точкой; tag — что происходит */
+void diag_stack(const char *tag)
+{
+    void *fr[24];
+    USHORT k = RtlCaptureStackBackTrace(2, 24, fr, NULL);
+    const BYTE *exe = (const BYTE *)GetModuleHandleW(NULL);
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(exe + ((IMAGE_DOS_HEADER *)exe)->e_lfanew);
+    SIZE_T sz = nt->OptionalHeader.SizeOfImage;
+    char b[700];
+    int p = snprintf(b, sizeof b, "diag_stack: %s thread %lu:", tag, GetCurrentThreadId());
+    for (USHORT i = 0; i < k && p < (int)sizeof b - 24; i++) {
+        const BYTE *a = (const BYTE *)fr[i];
+        if (a >= exe && a < exe + sz) p += snprintf(b + p, sizeof b - p, " e%llx", (unsigned long long)(a - exe));
+        else p += snprintf(b + p, sizeof b - p, " .");
+    }
+    ui4k_log("%s", b);
+}
+
+void diag_on_create(UINT w, UINT h)
+{
+    static volatile LONG fired;
+    if (w != g_cfg.diag_on_w || h != g_cfg.diag_on_h || g_cap || InterlockedIncrement(&fired) > 3) return;   /* до 3 снимков */
+    Screen s = screen_get();
+    ui4k_log("=== diag: capture start (cache %ux%u created); screen logical %ldx%ld physical %ldx%ld, scale %d/%d", w, h,
+             s.lw, s.lh, s.pw, s.ph, g_cfg.scale.num, g_cfg.scale.den);
+    InterlockedExchange(&g_seq, 0);
+    InterlockedExchange(&g_frames, 6);
+    InterlockedExchange(&g_cap, 1);
 }
 
 void diag_present(void)
 {
     static int was;
-    int down = (GetAsyncKeyState(VK_CONTROL) & 0x8000) && (GetAsyncKeyState(VK_F11) & 0x8000);
-    if (g_cap) {
+    int down = ui4k_hotkey(VK_F11, 1);
+    if (g_ring) {   /* «запись прошлого»: граница кадра со временем; Ctrl+F11 — буфер в файл */
+        LONG fno = InterlockedIncrement(&g_frame_no);
+        SYSTEMTIME t;
+        GetLocalTime(&t);
+        char m[80];
+        snprintf(m, sizeof m, "=== frame %ld %02u:%02u:%02u.%03u", (long)fno, t.wHour, t.wMinute, t.wSecond, t.wMilliseconds);
+        emit(m);
+        if ((down && !was) || (g_cfg.diag_at && fno == g_cfg.diag_at)) ring_dump();
+    } else if (g_cap) {
         LONG left = InterlockedDecrement(&g_frames);
         ui4k_log("=== diag: Present (frames left %ld)", left);
         if (left <= 0) {
@@ -350,7 +482,7 @@ void diag_present(void)
     static LARGE_INTEGER t0, last, f;
     static float ft[4096];
     static int nft;
-    int d12 = (GetAsyncKeyState(VK_CONTROL) & 0x8000) && (GetAsyncKeyState(VK_F8) & 0x8000);
+    int d12 = ui4k_hotkey(VK_F8, 1);
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
     if (d12 && !was12 && !on) {

@@ -117,6 +117,125 @@ int pak_cs_name(const Pak *p, const void *code, size_t n, char *name, size_t cap
     return 0;
 }
 
+/* Э3 (реверс 18.11): постобработка кладёт в буфер сцены свои числа по своей раскладке, и один регистр в разных проходах
+ * значит разное (c14 — размер текстуры яркости и сила лучей линзы). Таблица — имена переменных с размером экрана или
+ * его частью; место — из packoffset в исходнике игры. Правка всё равно сверяет значение (cbfix.c). */
+static const struct { const char *file, *var; int add, exact; } SLOT_VARS[] = {
+    {"shader/dx10/postprocess/gauss_blur.hlsl", "halfPixel", 0, 0},                      /* c0.xy: полпикселя размываемой */
+    {"shader/dx10/postprocess/copy.hlsl", "src_size", 0, 0},                             /* c1.xy */
+    {"shader/dx10/postprocess/copy.hlsl", "one_pixel", 0, 0},                            /* c1.zw */
+    {"shader/dx10/postprocess/lenseffects/heat_mask.hlsl", "textureDim", 0, 0},
+    {"shader/dx10/postprocess/luma.hlsl", "textureDimension", 0, 0},                     /* pscLEParams.xy */
+    {"shader/dx10/postprocess/lenseffects/lens_effects.hlsl", "textureDims_LR", 0, 0},  /* pscLELightPos.zw */
+    {"shader/dx10/postprocess/lenseffects/lens_effects.hlsl", "fxaaNormPixelWidthHeight", 0, 0},   /* pscFXAAParams.zw */
+    {"shader/dx10/postprocess/lenseffects_v2/lens_effects.hlsl", "textureDims_LR", 0, 0},
+    {"shader/dx10/postprocess/dof/dof_blur.hlsl", "textureDimensions", 0, 0},           /* pscDOFParams.yz */
+    {"shader/dx10/sky.hlsl", "sunMoonPosRes", 2, 0},                                     /* .zw — разрешение устройства */
+    /* экранные проходы ставят «камеру» в центр экрана (960, 540, 2000) — то же место, что cameraOrigin мировых;
+     * v2 правила его поиском по значению, проверено в игре — оставляем, значение сверяется.
+     * 20.11: только точное совпадение. В мировых проходах здесь настоящая позиция камеры (тысячи единиц, -4474, 4477);
+     * допуск ±1 пиксель половинной/четвертной картинки (±2 у 960x540, ±4 у 480x270) принимал камеру в этих точках карты
+     * за центр экрана, и освещение кадра портилось. Центр экрана игра ставит точно — половина логического экрана */
+    {"shader/dx10/postprocess/ssao/SSAO.hlsl", "cameraOrigin", 0, 1},
+};
+
+static int is_id(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'; }
+
+/* «#define name _PSC(pscgScene, N)» в shader_constants.h -> N; -1 — нет */
+static int scene_reg(const Pak *p, const char *name, size_t nl)
+{
+    const PakEnt *e = pak_find(p, "shader/dx10/shader_constants.h");
+    if (!e) return -1;
+    const char *t = (const char *)p->base + e->off, *end = t + e->size;
+    for (const char *s = t; s + 8 + nl < end; s++) {
+        if (memcmp(s, "#define", 7) || (s[7] != ' ' && s[7] != '\t')) continue;
+        const char *c = s + 7;
+        while (c < end && (*c == ' ' || *c == '\t')) c++;
+        if ((size_t)(end - c) <= nl || memcmp(c, name, nl) || is_id(c[nl])) continue;
+        c += nl;
+        while (c < end && (*c == ' ' || *c == '\t')) c++;
+        static const char psc[] = "_PSC(pscgScene,";
+        if ((size_t)(end - c) < sizeof psc || memcmp(c, psc, sizeof psc - 1)) return -1;
+        c += sizeof psc - 1;
+        while (c < end && (*c == ' ' || *c == '\t')) c++;
+        int v = 0, d = 0;
+        while (c < end && *c >= '0' && *c <= '9' && v < 10000) { v = v * 10 + (*c++ - '0'); d++; }
+        return d ? v : -1;
+    }
+    return -1;
+}
+
+/* «var : packoffset(REG[.c])» в тексте -> номер числа; -1 — нет */
+static int var_slot(const Pak *p, const char *t, const char *end, const char *var)
+{
+    size_t vl = strlen(var);
+    for (const char *s = t; s + vl < end; s++) {
+        if (memcmp(s, var, vl) || (s > t && is_id(s[-1])) || is_id(s[vl])) continue;
+        const char *c = s + vl;
+        while (c < end && (*c == ' ' || *c == '\t')) c++;
+        if (c >= end || *c != ':') continue;
+        c++;
+        while (c < end && (*c == ' ' || *c == '\t')) c++;
+        static const char po[] = "packoffset";
+        if ((size_t)(end - c) < sizeof po || memcmp(c, po, sizeof po - 1)) continue;
+        c += sizeof po - 1;
+        while (c < end && (*c == ' ' || *c == '\t' || *c == '(')) c++;
+        const char *r = c;
+        while (c < end && is_id(*c)) c++;
+        size_t rl = (size_t)(c - r);
+        if (!rl) return -1;
+        int reg = -1;
+        if (r[0] == 'c' && rl > 1 && r[1] >= '0' && r[1] <= '9') {
+            reg = 0;
+            for (size_t i = 1; i < rl && r[i] >= '0' && r[i] <= '9'; i++) reg = reg * 10 + (r[i] - '0');
+        } else {
+            char nm[64];
+            if (rl >= sizeof nm) return -1;
+            memcpy(nm, r, rl);
+            nm[rl] = 0;
+            reg = scene_reg(p, nm, rl);
+        }
+        if (reg < 0) return -1;
+        int comp = 0;
+        if (c < end && *c == '.' && c + 1 < end) {
+            const char *xyzw = "xyzw";
+            for (int k = 0; k < 4; k++) if (c[1] == xyzw[k]) comp = k;
+        }
+        return reg * 4 + comp;
+    }
+    return -1;
+}
+
+int pak_screen_slots(const Pak *p, unsigned *out, int max, int *names, unsigned char *exact)
+{
+    int n = 0, found = 0;
+    for (size_t i = 0; i < sizeof SLOT_VARS / sizeof SLOT_VARS[0]; i++) {
+        const PakEnt *e = pak_find(p, SLOT_VARS[i].file);
+        if (!e) continue;
+        const char *t = (const char *)p->base + e->off;
+        int v = var_slot(p, t, t + e->size, SLOT_VARS[i].var);
+        if (v < 0) continue;
+        found++;
+        unsigned at = (unsigned)(v + SLOT_VARS[i].add);
+        int dup = -1, k;
+        for (k = 0; k < n; k++) if (out[k] == at) dup = k;
+        if (dup >= 0) {   /* то же место у другой переменной: допуск остаётся, если его просит хоть одна */
+            if (exact && !SLOT_VARS[i].exact) exact[dup] = 0;
+            continue;
+        }
+        if (n >= max) continue;
+        for (k = n; k > 0 && out[k - 1] > at; k--) {   /* по возрастанию */
+            out[k] = out[k - 1];
+            if (exact) exact[k] = exact[k - 1];
+        }
+        out[k] = at;
+        if (exact) exact[k] = (unsigned char)(SLOT_VARS[i].exact != 0);
+        n++;
+    }
+    if (names) *names = found;
+    return n;
+}
+
 int pak_scene_groups(const Pak *p)
 {
     const PakEnt *e = pak_find(p, "shader/dx10/shader_constants.h");

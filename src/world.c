@@ -62,6 +62,14 @@ static int is_ui_vs(CtxState *s)
     return s->vs_ui;
 }
 
+/* perf.c: VS контекста — интерфейса; рисование интерфейса в экран на непосредственном контексте (начало интерфейса) */
+int world_ui_vs(ID3D11DeviceContext *c) { return is_ui_vs(&CTXW(c)->st); }
+int world_ui_draw(ID3D11DeviceContext *c)
+{
+    CtxState *s = &CTXW(c)->st;
+    return CTXW(c)->type == D3D11_DEVICE_CONTEXT_IMMEDIATE && s->bbbound && !s->zon && is_ui_vs(s);
+}
+
 static int split(void) { return !ratio_eq(g_cfg.scene, g_cfg.scale); }
 static int active(ID3D11DeviceContext *c) { return g_hdroff && split() && g_bb && CTXW(c)->type == D3D11_DEVICE_CONTEXT_IMMEDIATE; }
 
@@ -164,7 +172,8 @@ ID3D11RenderTargetView *const *world_rtv(ID3D11DeviceContext *c, UINT n, ID3D11R
                                          ID3D11DepthStencilView *dsv, ID3D11RenderTargetView **tmp, void *ret)
 {
     CtxState *s = &CTXW(c)->st;
-    if (CTXW(c)->type != D3D11_DEVICE_CONTEXT_IMMEDIATE || overlay_call(ret)) return rtv;
+    /* ревизия 20.11, Ф2: оверлей внутри Present (in_present) — его цели не запоминаем вместо целей игры */
+    if (CTXW(c)->type != D3D11_DEVICE_CONTEXT_IMMEDIATE || overlay_call(ret) || in_present()) return rtv;
     g_imm = c;
     forget_orig(s);
     s->bbbound = s->bbsub = 0;
@@ -190,6 +199,7 @@ static void to_screen(ID3D11DeviceContext *c, const char *why)
     g_world = 0;
     if (!g_w || !g_bb) return;
     ID3D11Resource *from = (ID3D11Resource *)g_w;
+    if (g_cfg.perf) perf_world_copy(RC(c), 0);
     if (g_wf) {   /* MSAA: свести выборки мира, растянуть сведённое (в многовыборочный экран — во все выборки) */
         ORIGC(c, ResolveSubresource, PFN_RS)(RC(c), (ID3D11Resource *)g_wf, 0, (ID3D11Resource *)g_w, 0, g_wfmt);
         from = (ID3D11Resource *)g_wf;
@@ -198,6 +208,7 @@ static void to_screen(ID3D11DeviceContext *c, const char *why)
         static volatile LONG once;
         if (!InterlockedExchange(&once, 1)) LOG("world: own target could NOT be drawn to the back buffer");
     }
+    if (g_cfg.perf) perf_world_copy(RC(c), 1);
     if (g_cap) diag_note(c, "world: own target -> back buffer (%s)", why);
     static const char *said[8];   /* каждая причина — один раз в обычный лог */
     for (int i = 0; i < 8; i++) {
@@ -254,6 +265,13 @@ void world_present(void)
 {
     ID3D11DeviceContext *c = g_imm;
     if (c && g_world && g_w && active(c)) to_screen(c, "frame without interface");
+}
+
+/* После Present: следующий кадр снова начинается с мира. Не раньше: оверлеи и запись экрана (Steam F12, OBS, Discord)
+ * снимают кадр внутри Present — до него подмена back buffer целью мира отдала бы им мир без интерфейса. */
+void world_frame_start(void)
+{
+    ID3D11DeviceContext *c = g_imm;
     g_world = 1;
     g_last_dst = g_cur_dst; g_cur_dst = NULL; g_seen_last = 0; g_3d = 0;
     /* back buffer остался привязан с интерфейса — следующий кадр рисует мир сразу: снова подменить */
@@ -329,9 +347,13 @@ static HRESULT STDMETHODCALLTYPE hk_CreateVertexShader(ID3D11Device *d, const vo
     return hr;
 }
 
+/* метка «VS интерфейса» нужна и утолщению линий (Э5, draw.c) — вердикт 19.11, п. 6: при presets=0 и мире = экран без неё
+ * линии молча не утолщались */
+static int need_vs(void) { return presets_on() || !ratio_eq(g_cfg.scene, g_cfg.scale) || g_cfg.thick_lines; }
+
 void world_hook_device(ID3D11Device *dev)
 {
-    if (!presets_on() && ratio_eq(g_cfg.scene, g_cfg.scale)) return;
+    if (!need_vs()) return;
     VT_PATCH(dev, ID3D11DeviceVtbl, CreateVertexShader, hk_CreateVertexShader, &h_cvs);
 }
 
@@ -340,7 +362,7 @@ void world_install(void)
     if (g_cfg.game_hdr == 0) { g_hdroff = 1; LOG("world: HDR is off in the game settings - own world target, screen textures at world size"); }
     CTX_HOOK(ClearRenderTargetView, hk_ClearRenderTargetView);   /* и для снимка кадра (diag) */
     CTX_HOOK(ResolveSubresource, hk_ResolveSubresource);
-    if (!presets_on() && ratio_eq(g_cfg.scene, g_cfg.scale)) return;
+    if (!need_vs()) return;
     CTX_HOOK(VSSetShader, hk_VSSetShader);
     CTX_HOOK(OMSetDepthStencilState, hk_OMSetDepthStencilState);
 }

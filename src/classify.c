@@ -40,6 +40,21 @@ TexClass tex_classify(const D3D11_TEXTURE2D_DESC *d, int has_init, UINT lw, UINT
     return TEX_KEEP;
 }
 
+int tex_origin_candidate(const D3D11_TEXTURE2D_DESC *d, int has_init, Ratio k)
+{
+    const UINT rs = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    if (!d || has_init || ratio_is_one(k)) return 0;
+    /* 19.11: «t:create» делает и глубину вида 3D (GUI2::eViewport: 512x512 и 1024x1024 R24G8 — 3D-иконки инвентаря).
+     * Цель вида увеличивалась, глубина — нет: размеры расходились, мод отвязывал глубину, и модель рисовалась без неё
+     * (задние грани поверх передних — чёрный клин на ящике с инструментами). Глубина — тот же кандидат */
+    int target = (d->BindFlags & rs) == rs, depth = (d->BindFlags & D3D11_BIND_DEPTH_STENCIL) && !(d->BindFlags & D3D11_BIND_RENDER_TARGET);
+    if ((!target && !depth) || d->SampleDesc.Count != 1 || d->ArraySize != 1 || d->MipLevels != 1) return 0;
+    if (d->Usage != D3D11_USAGE_DEFAULT || d->CPUAccessFlags) return 0;
+    return d->Width && d->Height && d->Width <= 4096 && d->Height <= 4096 &&
+           to_phys(k, d->Width) <= D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION &&
+           to_phys(k, d->Height) <= D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION;
+}
+
 UINT tex_full_mips(UINT w, UINT h)
 {
     UINT m = 1, s = w > h ? w : h;

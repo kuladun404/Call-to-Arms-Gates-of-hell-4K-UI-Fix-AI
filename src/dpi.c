@@ -44,6 +44,7 @@ void dpi_init(void)
         ok = old && old();
     }
     int after = awareness(u);
+    if (sysdpi && after > 0) dpi = sysdpi();   /* не понимающему DPI процессу Windows отвечает 96 (100%) — спросить заново */
     LOG("dpi: process was %s, now %s%s (Windows scale %u%%)", name(before), name(after), ok ? "" : " - could not change it",
         dpi * 100 / 96);
 }

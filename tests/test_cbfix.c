@@ -1,4 +1,5 @@
 /* F08: замена экранных пар в CB (чистая функция). Последняя строка PASS/FAIL. */
+#include <string.h>
 #include <stdio.h>
 #include "cbfix.h"
 
@@ -83,7 +84,54 @@ int main(void)
     hg[12] = 31288.2f; hg[13] = 324; hg[14] = 0.5f;   /* −1/R² нет — не тот буфер */
     CHECK(cb_hbao_radius_index(hg, 84) == -1, "no R2 / -1/R2 pair - must not guess: %d", cb_hbao_radius_index(hg, 84));
     CHECK(cb_hbao_radius_index(he, 14) == -1, "pair beyond the end of the buffer must not be read");
+    /* 20.11: буфер игры в прямом управлении (flash_ui4k.log), угол обзора на переходе бега: UVToViewA.x·A.y = −1 —
+     * [7] 1/высота, [8] A.x, [9] A.y устроены как «радиус, R², −1/R²». Раньше находилось [7] */
+    float hx[84] = {0};
+    hx[4] = 1.0f / 480; hx[5] = 1.0f / 270; hx[6] = 1.0f / 1920; hx[7] = 1.0f / 1080;
+    hx[8] = 1.33333f; hx[9] = -0.75f; hx[10] = -0.666665f; hx[11] = 0.375f;
+    hx[12] = 25500; hx[13] = 324; hx[14] = -0.00308642f; hx[15] = 0.3f;
+    CHECK(cb_hbao_radius_at(hx, 84, 7) && cb_hbao_radius_at(hx, 84, 12), "both places look like the radius at this angle");
+    CHECK(cb_hbao_radius_index(hx, 84) == -1, "two candidates - must not guess: %d", cb_hbao_radius_index(hx, 84));
+    hx[8] = 1.38818f; hx[9] = -0.780851f;   /* обычный кадр прямого управления */
+    CHECK(cb_hbao_radius_index(hx, 84) == 12, "ordinary direct-control frame: %d", cb_hbao_radius_index(hx, 84));
+    CHECK(!cb_hbao_radius_at(hx, 84, 82) && !cb_hbao_radius_at(hx, 84, 7), "end of buffer / not a radius");
 
+    /* Э3: только заданные места; та же пара в другом месте не трогается */
+    {
+        float f[16] = {0};
+        f[4] = 1920; f[5] = 1080;        /* место 4 — в списке */
+        f[10] = 1920; f[11] = 1080;      /* место 10 — нет */
+        f[12] = 0.5f; f[13] = 4316.5f;   /* место 12 — в списке, но не экранная пара */
+        const unsigned at[] = {4, 12, 15};   /* 15 — пара вылезла бы за конец */
+        int k = cb_fix_at(f, 16, at, 3, 1920, 1080, 3840, 2160);
+        CHECK(k == 1, "one pair fixed at named places: %d", k);
+        CHECK(f[4] == 3840 && f[5] == 2160, "named place fixed: %g %g", f[4], f[5]);
+        CHECK(f[10] == 1920 && f[11] == 1080, "same pair elsewhere left alone: %g %g", f[10], f[11]);
+        CHECK(f[12] == 0.5f && f[13] == 4316.5f, "named place with other numbers left alone");
+        float g[16] = {0};
+        g[0] = 1.0f / 1920; g[1] = 1.0f / 1080;
+        const unsigned a0[] = {0};
+        CHECK(cb_fix_at(g, 16, a0, 1, 1920, 1080, 3840, 2160) == 1 && g[0] == 1.0f / 3840, "inverse pair at a named place");
+        CHECK(cb_fix_at(g, 16, a0, 1, 1920, 1080, 1920, 1080) == 0, "scale 1 - nothing");
+    }
+    /* 20.11: место центра экрана (c3) — в мировых проходах позиция камеры. С допуском камера в (961, 541) принималась
+     * за центр экрана 960x540 и удваивалась; с exact — только точное значение */
+    {
+        const unsigned at[] = {12};
+        const unsigned char ex[] = {1};
+        float c[16] = {0};
+        c[12] = 961; c[13] = 541; c[14] = 300;
+        float d[16];
+        memcpy(d, c, sizeof d);
+        CHECK(cb_fix_at(d, 16, at, 1, 1920, 1080, 3840, 2160) == 1, "with tolerance the camera near (960, 540) is taken for the screen (old way)");
+        CHECK(cb_fix_at_x(c, 16, at, ex, 1, 1920, 1080, 3840, 2160) == 0 && c[12] == 961 && c[13] == 541,
+              "exact place: camera at (961, 541) left alone: %g %g", c[12], c[13]);
+        c[12] = 960; c[13] = 540;
+        CHECK(cb_fix_at_x(c, 16, at, ex, 1, 1920, 1080, 3840, 2160) == 1 && c[12] == 1920 && c[13] == 1080,
+              "exact place: screen centre (960, 540) still fixed: %g %g", c[12], c[13]);
+        c[12] = 1920.4f; c[13] = 1080.4f;
+        CHECK(cb_fix_at_x(c, 16, at, ex, 1, 1920, 1080, 3840, 2160) == 0, "exact place: (1920.4, 1080.4) left alone");
+    }
     printf(fails ? "FAIL %d\n" : "PASS\n", fails);
     return fails != 0;
 }

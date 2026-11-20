@@ -10,3 +10,6 @@ typedef enum { TEX_KEEP = 0, TEX_SCREEN = 1, TEX_UI_RT = 2 } TexClass;
 TexClass tex_classify(const D3D11_TEXTURE2D_DESC *d, int has_init, UINT lw, UINT lh, Ratio k);
 UINT tex_full_mips(UINT w, UINT h);
 D3D11_TEXTURE2D_DESC tex_phys_desc(const D3D11_TEXTURE2D_DESC *d, Ratio k);
+/* Э2: может ли текстура быть кэшем окна (тогда решает происхождение — origin.c): цель + чтение шейдером, без начальных
+ * данных, 1 выборка, 1 mip, 1 слой, обычная (без доступа CPU), влезает в предел после xk */
+int tex_origin_candidate(const D3D11_TEXTURE2D_DESC *d, int has_init, Ratio k);

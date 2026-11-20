@@ -836,6 +836,179 @@ static void t_dof(void)
     for (int i = 0; i < 8; i++) if (extra[i]) ID3D11PixelShader_Release(extra[i]);
 }
 
+/* ============ box: шаг уменьшения шейдера копирования игры (Э8, иконки инвентаря) ============
+ * Шейдер с раскладкой postprocess/copy.hlsl (b0: src_size c1.xy, one_pixel c1.zw; baseTexture t0) выводит шаг и размер,
+ * которые видит. Источник 300x200 BGRA (кэш окна) увеличен x1.5 до 450x300, цель 1280x720 — тоже x1.5: на время
+ * рисования 1/450 и 450, потом снова числа игры. Шаг — по коэффициенту цели (половина её пикселя при 2:1): источник
+ * не увеличен, цель x1.5 — 1/384 у 256; цель не увеличена — шаг игры, а размер — настоящий. Числа не размера источника
+ * не трогаются. Тот же буфер правит и dof.c (радиус в c24.x): рисования размытия и копии вперемешку — у каждого своя. */
+static int g_box_on = 1;
+static void t_box(void)
+{
+    CHECK(shaders(), "shaders");
+    if (!g_vs) return;
+    static const char *src_box =
+        "cbuffer data1 : register(b0) { float2 src_size : packoffset(c1.x); float2 one_pixel : packoffset(c1.z); }"
+        "Texture2D baseTexture : register(t0);"
+        "float4 main() : SV_Target { return float4(one_pixel.x * 64, src_size.x / 1024, baseTexture.Load(int3(0, 0, 0)).g, 1); }";
+    static const char *src_oth = "cbuffer o : register(b0) { float4 other : packoffset(c1); float rad : packoffset(c24.x); }"
+                                 "float4 main() : SV_Target { return float4(other.z * 64, other.x / 1024, rad / 16, 1); }";
+    static const char *src_dof =
+        "cbuffer dofb : register(b0) { float maxCoCRadiusPixels : packoffset(c24.x); float2 textureDimensions : packoffset(c24.y); }"
+        "float4 main() : SV_Target { return float4(0, 0, maxCoCRadiusPixels / 16, 1); }";
+    ID3DBlob *bb = compile(src_box, "ps_5_0"), *bo = compile(src_oth, "ps_5_0"), *bd = compile(src_dof, "ps_5_0");
+    CHECK(bb && bo && bd, "compile");
+    if (!bb || !bo || !bd) return;
+    ID3D11PixelShader *pb = NULL, *po = NULL, *pd = NULL;
+    ID3D11Device_CreatePixelShader(dev, ID3D10Blob_GetBufferPointer(bb), ID3D10Blob_GetBufferSize(bb), NULL, &pb);
+    ID3D11Device_CreatePixelShader(dev, ID3D10Blob_GetBufferPointer(bo), ID3D10Blob_GetBufferSize(bo), NULL, &po);
+    ID3D11Device_CreatePixelShader(dev, ID3D10Blob_GetBufferPointer(bd), ID3D10Blob_GetBufferSize(bd), NULL, &pd);
+    D3D11_BUFFER_DESC bdsc = {156 * 4, D3D11_USAGE_DYNAMIC, D3D11_BIND_CONSTANT_BUFFER, D3D11_CPU_ACCESS_WRITE, 0, 0};
+    ID3D11Buffer *cb = NULL;
+    ID3D11Device_CreateBuffer(dev, &bdsc, NULL, &cb);
+    ID3D11Texture2D *t = tex(1280, 720, RT, NULL);
+    ID3D11Texture2D *big = tex_ex(300, 200, DXGI_FORMAT_B8G8R8A8_UNORM, 1, 1, D3D11_USAGE_DEFAULT, RT, 0, NULL);   /* кэш окна */
+    ID3D11Texture2D *pl = tex_ex(256, 256, DXGI_FORMAT_B8G8R8A8_UNORM, 1, 1, D3D11_USAGE_DEFAULT, RT, 0, NULL);    /* не увеличен */
+    ID3D11Texture2D *pt = tex(256, 256, RT, NULL);   /* цель x1 (формат чтения теста) */
+    ID3D11RenderTargetView *v = NULL, *vt = NULL;
+    if (pt) ID3D11Device_CreateRenderTargetView(dev, (ID3D11Resource *)pt, NULL, &vt);
+    ID3D11ShaderResourceView *sbig = NULL, *spl = NULL;
+    if (t) ID3D11Device_CreateRenderTargetView(dev, (ID3D11Resource *)t, NULL, &v);
+    if (big) ID3D11Device_CreateShaderResourceView(dev, (ID3D11Resource *)big, NULL, &sbig);
+    if (pl) ID3D11Device_CreateShaderResourceView(dev, (ID3D11Resource *)pl, NULL, &spl);
+    if (!pb || !po || !pd || !cb || !v || !vt || !sbig || !spl) { CHECK(0, "objects"); return; }
+    UINT w, h;
+    real_size(big, &w, &h);
+    CHECK(w == 450 && h == 300, "source %ux%u, expected enlarged 450x300", w, h);
+    real_size(pl, &w, &h);
+    CHECK(w == 256 && h == 256, "plain source %ux%u, expected 256x256 as is", w, h);
+    real_size(pt, &w, &h);
+    CHECK(w == 256 && h == 256, "plain target %ux%u, expected 256x256 as is", w, h);
+
+    #define WRITE(sw, sh, rad) do { D3D11_MAPPED_SUBRESOURCE m; \
+        if (SUCCEEDED(ID3D11DeviceContext_Map(ctx, (ID3D11Resource *)cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) { \
+            float *f = (float *)m.pData; memset(f, 0, 156 * 4); f[4] = (sw); f[5] = (sh); f[6] = 1.0f / (sw); f[7] = 1.0f / (sh); \
+            f[96] = (rad); f[97] = (rad) ? 1280.0f : 0; f[98] = (rad) ? 720.0f : 0; \
+            ID3D11DeviceContext_Unmap(ctx, (ID3D11Resource *)cb, 0); } } while (0)
+    D3D11_VIEWPORT vp = {0, 0, 1280, 720, 0, 1};
+    ID3D11RenderTargetView *cur_v = v;   /* цель рисования и чтения */
+    ID3D11Texture2D *cur_t = t;
+    #define DRAW(ps, srv) do { ID3D11ShaderResourceView *s_ = (srv); \
+        ID3D11DeviceContext_OMSetRenderTargets(ctx, 1, &cur_v, NULL); ID3D11DeviceContext_RSSetViewports(ctx, 1, &vp); \
+        ID3D11DeviceContext_IASetPrimitiveTopology(ctx, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST); \
+        ID3D11DeviceContext_VSSetShader(ctx, g_vs, NULL, 0); ID3D11DeviceContext_PSSetConstantBuffers(ctx, 0, 1, &cb); \
+        ID3D11DeviceContext_PSSetShaderResources(ctx, 0, 1, &s_); \
+        ID3D11DeviceContext_PSSetShader(ctx, (ps), NULL, 0); ID3D11DeviceContext_Draw(ctx, 3, 0); } while (0)
+    /* шаг 1/step и размер size (r = шаг x64, g = размер / 1024); rad < 0 — радиус не смотреть */
+    #define EXPECT(step, size, rad, what) do { UINT p_ = px_r(cur_t), r_ = p_ & 0xFF, g_ = (p_ >> 8) & 0xFF, b_ = (p_ >> 16) & 0xFF; \
+        UINT wr_ = (UINT)(64.0f / (step) * 255 + 0.5f), wg_ = (UINT)((float)(size) / 1024 * 255 + 0.5f); \
+        printf("%-52s step 1/%.0f (want 1/%d), size %.0f (want %d), radius %.2f\n", what, r_ ? 64 * 255.0 / r_ : 0.0, (int)(step), \
+               g_ * 1024 / 255.0, (int)(size), b_ * 16 / 255.0); \
+        CHECK(r_ + 1 >= wr_ && r_ <= wr_ + 1, "%s: step 1/%.0f, expected 1/%d", what, r_ ? 64 * 255.0 / r_ : 0.0, (int)(step)); \
+        CHECK(g_ + 1 >= wg_ && g_ <= wg_ + 1, "%s: size %.0f, expected %d", what, g_ * 1024 / 255.0, (int)(size)); \
+        if ((rad) >= 0) { UINT wb_ = (UINT)((float)(rad) / 16 * 255 + 0.5f); \
+            CHECK(b_ + 1 >= wb_ && b_ <= wb_ + 1, "%s: radius %.2f, expected %.2f", what, b_ * 16 / 255.0, (double)(rad)); } } while (0)
+    #define EXPECT_RAD(rad, what) do { UINT b_ = (px_r(cur_t) >> 16) & 0xFF, wb_ = (UINT)((float)(rad) / 16 * 255 + 0.5f); \
+        printf("%-52s radius %.2f (want %.2f)\n", what, b_ * 16 / 255.0, (double)(rad)); \
+        CHECK(b_ + 1 >= wb_ && b_ <= wb_ + 1, "%s: radius %.2f, expected %.2f", what, b_ * 16 / 255.0, (double)(rad)); } while (0)
+    int on = g_box_on;
+    float rk = 2 * 1.5f * 1.5f;   /* радиус размытия у dof.c: 2 x s^2, s = 1.5 */
+
+    /* вердикт 19.11, п. 1: отсев помнит живые шейдеры, а не созданные. 40 созданий подряд (каждый тут же уничтожен) —
+     * переполнения нет; 34 живых сразу — есть (строка в логе), и копия всё равно правится: метку спрашиваем всегда */
+    for (int i = 0; i < 40; i++) {
+        ID3D11PixelShader *x = NULL;
+        ID3D11Device_CreatePixelShader(dev, ID3D10Blob_GetBufferPointer(bb), ID3D10Blob_GetBufferSize(bb), NULL, &x);
+        if (x) ID3D11PixelShader_Release(x);
+    }
+    CHECK(!log_has("such shaders alive at once"), "40 copy shaders created one after another (each released): filter overflowed");
+    ID3D11PixelShader *many[34] = {0};
+    for (int i = 0; i < 34; i++)
+        ID3D11Device_CreatePixelShader(dev, ID3D10Blob_GetBufferPointer(bb), ID3D10Blob_GetBufferSize(bb), NULL, &many[i]);
+    if (on) CHECK(log_has("box: copy: more than 32 such shaders alive at once"), "34 copy shaders alive: no overflow line");
+    else CHECK(!log_has("such shaders alive at once"), "box_step=0: copy shaders are not tagged at all");
+
+    WRITE(300, 200, 0);
+    DRAW(pb, sbig);
+    EXPECT(on ? 450 : 300, on ? 450 : 300, -1, "copy from the enlarged source (34 copy shaders alive)");
+    for (int i = 0; i < 34; i++) if (many[i]) ID3D11PixelShader_Release(many[i]);
+    WRITE(300, 200, 0);
+    DRAW(pb, sbig);
+    EXPECT(on ? 450 : 300, on ? 450 : 300, -1, "copy from the enlarged source");
+    DRAW(po, sbig);
+    EXPECT(300, 300, -1, "other pass, same buffer: the game's numbers");
+    DRAW(pb, sbig);
+    DRAW(pb, sbig);
+    EXPECT(on ? 450 : 300, on ? 450 : 300, -1, "copy twice in a row");
+    ID3D11DeviceContext_PSSetShader(ctx, pb, NULL, 0);   /* шейдер привязан раньше записи */
+    WRITE(300, 200, 0);
+    DRAW(pb, sbig);
+    EXPECT(on ? 450 : 300, on ? 450 : 300, -1, "copy, buffer written after the shader");
+    WRITE(256, 256, 0);
+    DRAW(pb, spl);
+    EXPECT(on ? 384 : 256, 256, -1, "source not enlarged, target x1.5: half its pixel");
+    cur_v = vt; cur_t = pt;              /* цель не увеличена (вид x2 -> ячейки после смены масштаба — разные k) */
+    vp.Width = vp.Height = 256;
+    WRITE(300, 200, 0);
+    DRAW(pb, sbig);
+    EXPECT(300, on ? 450 : 300, -1, "enlarged source, target x1: game's step, real size");
+    cur_v = v; cur_t = t;
+    vp.Width = 1280; vp.Height = 720;
+    WRITE(64, 64, 0);
+    DRAW(pb, sbig);
+    EXPECT(64, 64, -1, "numbers that are not the source's size");
+    WRITE(300, 200, 0);
+    DRAW(pb, sbig);
+    WRITE(120, 80, 0);                                   /* свежая запись игры для другого прохода */
+    DRAW(po, sbig);
+    EXPECT(120, 120, -1, "other pass: fresh write after a copy kept");
+    /* размытие и копия по одному буферу вперемешку */
+    WRITE(300, 200, 2);
+    DRAW(pd, sbig);
+    EXPECT_RAD(rk, "blur");
+    DRAW(pb, sbig);
+    EXPECT(on ? 450 : 300, on ? 450 : 300, -1, "copy after blur");
+    DRAW(pd, sbig);
+    EXPECT_RAD(rk, "blur after copy");
+    DRAW(pb, sbig);
+    EXPECT(on ? 450 : 300, on ? 450 : 300, -1, "copy after blur again");
+    DRAW(po, sbig);
+    EXPECT(300, 300, 2, "other pass: the game's step and radius");
+    /* вердикт 19.11, п. 2: список команд отложенного контекста (иконки игра рисует в нём) кончается копией или размытием —
+     * правка мода не уходит со списком: после его исполнения другой проход без новой записи видит числа игры */
+    ID3D11DeviceContext *dc = NULL;
+    ID3D11Device_CreateDeferredContext(dev, 0, &dc);
+    CHECK(dc != NULL, "no deferred context");
+    for (int k = 0; dc && k < 2; k++) {
+        ID3D11DeviceContext *im = ctx;
+        ctx = dc;                          /* WRITE и DRAW — в отложенном контексте */
+        WRITE(300, 200, k ? 2 : 0);
+        DRAW(k ? pd : pb, sbig);
+        ctx = im;
+        ID3D11CommandList *cl = NULL;
+        ID3D11DeviceContext_FinishCommandList(dc, FALSE, &cl);
+        CHECK(cl != NULL, "command list");
+        if (cl) { ID3D11DeviceContext_ExecuteCommandList(ctx, cl, FALSE); ID3D11CommandList_Release(cl); }
+        DRAW(po, sbig);
+        EXPECT(300, 300, k ? 2 : -1, k ? "after a list that ends with a blur: the game's radius" : "after a list that ends with a copy: the game's step");
+    }
+    if (dc) ID3D11DeviceContext_Release(dc);
+    #undef WRITE
+    #undef DRAW
+    #undef EXPECT
+    #undef EXPECT_RAD
+    if (on) {
+        CHECK(log_has("box: copy shader"), "log: copy shader not recognised");
+        CHECK(log_has("box: copy from a 300x200 picture (real 450x300) into a target x3/2 - step 1/300 -> 1/450"), "log: step line missing");
+        CHECK(log_has("box: copy from a 256x256 picture (real 256x256) into a target x3/2 - step 1/256 -> 1/384"), "log: step line (x1 source)");
+    } else CHECK(!log_has("box: copy from"), "box_step=0, but the step was changed");
+    ID3D11ShaderResourceView_Release(sbig); ID3D11ShaderResourceView_Release(spl);
+    ID3D11Texture2D_Release(big); ID3D11Texture2D_Release(pl);
+    ID3D11RenderTargetView_Release(vt); ID3D11Texture2D_Release(pt);
+    ID3D11RenderTargetView_Release(v); ID3D11Texture2D_Release(t); ID3D11Buffer_Release(cb);
+    ID3D11PixelShader_Release(pb); ID3D11PixelShader_Release(po); ID3D11PixelShader_Release(pd);
+}
+
 /* ============ binds: растягивающая копия не меняет привязки игры (ревизия кода 17.11, п. 1) ============
  * Приёмник (обычная текстура) привязан на чтение в PS t3, VS t0 и CS t5, источник (увеличенный) — UAV вычислений u2,
  * ещё одна картинка — UAV вывода u1. Копия из источника в приёмник рисуется модом (настоящие размеры разные). D3D при
@@ -1077,6 +1250,8 @@ int main(int argc, char **argv)
     else if (!strcmp(argv[2], "pool")) t_pool();
     else if (!strcmp(argv[2], "deferred")) t_deferred();
     else if (!strcmp(argv[2], "labels") || !strcmp(argv[2], "second") || !strcmp(argv[2], "labels_ro")) t_labels(argv[2]);
+    else if (!strcmp(argv[2], "box")) t_box();
+    else if (!strcmp(argv[2], "box0")) { g_box_on = 0; t_box(); }
     else if (!strcmp(argv[2], "dofx")) { g_dof_exp = 2; g_dof_extra = 8; t_dof(); }
     else if (!strcmp(argv[2], "dofbig")) { g_dof_exp = 2; g_dof_n = 300; t_dof(); }   /* буфер сцены больше 256 float */
     else if (!strncmp(argv[2], "dof", 3)) { g_dof_exp = argv[2][3] ? atoi(argv[2] + 3) : 2; t_dof(); }   /* dof, dof1, dof0 */

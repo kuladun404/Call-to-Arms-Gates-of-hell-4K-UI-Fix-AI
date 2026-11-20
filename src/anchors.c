@@ -5,6 +5,7 @@
  * Каждая опора пишет в лог, откуда она взята. */
 #include "common.h"
 #include "gamedata.h"
+#include <stdio.h>
 
 WCHAR g_shaderpak[MAX_PATH];   /* путь к архиву шейдеров; пусто — <папка игры>\resource\shader.pak (тесты: test_shader_pak=) */
 
@@ -145,8 +146,41 @@ static HRESULT STDMETHODCALLTYPE hk_CreateBuffer(ID3D11Device *d, const D3D11_BU
     return VT_ORIG(d, &h_cbuf, PFN_CB)(d, bd, init, out);
 }
 
+/* ---- Э3: экранные места буфера сцены — по именам переменных шейдеров игры (gamedata.c) ---- */
+static unsigned g_slots[16];
+static unsigned char g_exact[16];   /* 20.11: место только с точным значением экрана (центр экрана / позиция камеры) */
+static int g_nslots;
+static volatile LONG g_slots_done;
+
+static void slots_find(void)
+{
+    if (InterlockedExchange(&g_slots_done, 1)) return;
+    const Pak *p = gd_pak();
+    int names = 0, n = p ? pak_screen_slots(p, g_slots, 16, &names, g_exact) : 0;
+    char list[160] = "";
+    for (int i = 0, k = 0; i < n && k < (int)sizeof list - 8; i++)
+        k += snprintf(list + k, sizeof list - k, "%s%u%s", i ? ", " : "", g_slots[i], g_exact[i] ? " (exact)" : "");
+    if (n >= 4 && names >= 6) {
+        g_nslots = n;
+        LOG("gamedata: screen numbers of the scene buffer at floats %s (%d shader variables found by name) - only these "
+            "pairs are checked (keys=1: Ctrl+F6 in game - all floats / named places)", list, names);
+    } else if (p) {
+        LOG("gamedata: screen numbers of the scene buffer by name - only %d variables found (game update?) - every float "
+            "is checked as before", names);
+    }
+}
+
+const unsigned *anchors_screen_slots(int *n)
+{
+    *n = g_nslots;
+    return g_nslots ? g_slots : NULL;
+}
+
+const unsigned char *anchors_screen_exact(void) { return g_nslots ? g_exact : NULL; }
+
 void anchors_hook_device(ID3D11Device *dev)
 {
+    slots_find();   /* до первой записи в буферы — при создании устройства */
     VT_PATCH(dev, ID3D11DeviceVtbl, CreateBuffer, hk_CreateBuffer, &h_cbuf);
 }
 

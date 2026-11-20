@@ -48,14 +48,16 @@ static int cursor_w(HCURSOR h)
 
 /* мониторы 4K + 21:9 (17.11): в списке — строки монитора игры (его пропорции) и одна строка-переход на другой монитор;
  * она переносит окно игры туда, строка своего монитора — обратно. Монитор игры — по строке в профиле игры (--two: строки
- * в профиле нет — основной 4K; --two21: в профиле 1720x720 — монитор 21:9, второй справа от основного) */
+ * в профиле нет — основной 4K; --two21: в профиле 2580x1080 — монитор 21:9, второй справа от основного; 20.11: прежняя
+ * строка 1720x720 меньше 1360x768 — игра её не показывает, и мод её больше не делает) */
 static int two_monitors(HMODULE m, const P *ps, int n, unsigned mw, unsigned mh)
 {
     int own = 0, ndoor = 0, door = -1, b = -1;
     for (int i = 0; i < n; i++) {
         if (ps[i].mw == mw && ps[i].mh == mh) {
             own++;
-            if (b < 0 || ps[i].lab == 2) b = i;
+            /* строка, которой игра стартует, — строка профиля: 4K — x2 (1920x1080), 21:9 — 2580x1080 (--two21) */
+            if (b < 0 || ps[i].lab == 2 || (ps[i].lw == 2580 && ps[i].lh == 1080)) b = i;
             CHECK((unsigned long long)ps[i].lw * mh == (unsigned long long)ps[i].lh * mw, "row %ux%u has the proportions of %ux%u",
                   ps[i].lw, ps[i].lh, mw, mh);
         } else { ndoor++; door = i; }
@@ -214,6 +216,9 @@ int main(int argc, char **argv)
         for (int j = 0; j < i; j++) CHECK(ps[i].lw != ps[j].lw || ps[i].lh != ps[j].lh, "unique %ux%u", ps[i].lw, ps[i].lh);
         CHECK(ps[i].lw % 4 == 0 && ps[i].lh % 4 == 0, "preset %ux%u divides by 4 (whole half / quarter screens)", ps[i].lw,
               ps[i].lh);
+        /* реверс 20.11 (0x50ae80): игра показывает только режимы >= 1360 x >= 768 — меньших строк быть не должно */
+        CHECK(ps[i].lw >= 1360 && ps[i].lh >= 768, "preset %ux%u is in the game's list (width >= 1360 and height >= 768)",
+              ps[i].lw, ps[i].lh);
         /* по возрастанию размера (игра всё равно сортирует сама) */
         if (i) CHECK((unsigned long long)ps[i].lw * ps[i].lh > (unsigned long long)ps[i - 1].lw * ps[i - 1].lh,
                      "row %d (%ux%u) after row %d (%ux%u): ascending", i, ps[i].lw, ps[i].lh, i - 1, ps[i - 1].lw, ps[i - 1].lh);
@@ -255,6 +260,49 @@ int main(int argc, char **argv)
     }
     CHECK(seen >= n && seen % n == 0, "EnumDisplaySettingsW: %d entries for %d presets", seen, n);
     if (two) return two_monitors(m, ps, n, mw, mh);
+    if (argc > 3 && !strcmp(argv[2], "--startup")) {
+        /* реверс 19.11 (eDeviceScreen): игра создаёт первый swap chain наименьшей строкой списка, строку профиля
+         * (argv[3]) применяет потом. Мод с самого начала — масштаб и мир строки профиля, не наименьшей */
+        unsigned pw = 0, ph = 0;
+        sscanf(argv[3], "%ux%u", &pw, &ph);
+        int p = -1;
+        for (int i = 0; i < n; i++) if (ps[i].lw == pw && ps[i].lh == ph) p = i;
+        CHECK(p > 0, "profile entry %ux%u is in the list and not the least one", pw, ph);
+        if (fails) { printf("FAIL %d\n", fails); return 1; }
+        PFN_CDSC cd0 = (PFN_CDSC)GetProcAddress(m, "D3D11CreateDeviceAndSwapChain");
+        HWND w0 = CreateWindowExW(0, L"STATIC", L"ui4k start", WS_OVERLAPPEDWINDOW, 0, 0, 640, 480, NULL, NULL, NULL, NULL);
+        DXGI_SWAP_CHAIN_DESC s0 = {{ps[0].lw, ps[0].lh, {0, 0}, DXGI_FORMAT_R8G8B8A8_UNORM, 0, 0}, {1, 0},
+                                   DXGI_USAGE_RENDER_TARGET_OUTPUT, 1, w0, TRUE, DXGI_SWAP_EFFECT_DISCARD, 0};
+        IDXGISwapChain *sc0 = NULL;
+        ID3D11Device *d0 = NULL;
+        if (FAILED(cd0(NULL, D3D_DRIVER_TYPE_WARP, NULL, 0, NULL, 0, D3D11_SDK_VERSION, &s0, &sc0, &d0, NULL, NULL))) {
+            printf("device\nFAIL\n");
+            return 1;
+        }
+        /* вид 3D, созданный в эти секунды (кэш окна 300x100): масштаб строки профиля */
+        D3D11_TEXTURE2D_DESC vd = {300, 100, 1, 1, DXGI_FORMAT_B8G8R8A8_UNORM, {1, 0}, D3D11_USAGE_DEFAULT,
+                                   D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, 0, 0};
+        ID3D11Texture2D *v0 = NULL;
+        ID3D11Device_CreateTexture2D(d0, &vd, NULL, &v0);
+        read_log();
+        char want[200];
+        snprintf(want, sizeof want, "preset %ux%u at start: the game opens on the first entry of its list", ps[0].lw, ps[0].lh);
+        CHECK(strstr(g_log, want), "start on the least entry recognised (%s)", want);
+        /* «] preset WxH: interface a/b (» — строка применена; таблица строк (log=2) пишется «]   preset ... world» */
+        /* масштаб строки профиля — с самого начала, ещё до первой строки игры (строка «preset ...» пишется только при смене) */
+        snprintf(want, sizeof want, "presets: interface %u/%u, world", ps[p].kn, ps[p].kd);
+        CHECK(strstr(g_log, want), "profile entry's scale from the start (%s)", want);
+        snprintf(want, sizeof want, "] preset %ux%u: interface", ps[0].lw, ps[0].lh);
+        CHECK(!strstr(g_log, want), "the least entry is not applied (%s)", want);
+        snprintf(want, sizeof want, "tex2D ui_rt: 300x100 -> %ux%u", upr(300, ps[p].kn, ps[p].kd), upr(100, ps[p].kn, ps[p].kd));
+        CHECK(strstr(g_log, want), "a cache made at start has the profile entry's scale (%s)", want);
+        if (v0) ID3D11Texture2D_Release(v0);
+        IDXGISwapChain_Release(sc0);
+        ID3D11Device_Release(d0);
+        DestroyWindow(w0);
+        printf(fails ? "FAIL %d\n" : "PASS\n", fails);
+        return fails != 0;
+    }
 
     /* A — строка с миром не родного размера, B — другая строка с другим миром и масштабом */
     int a = -1, b = -1;

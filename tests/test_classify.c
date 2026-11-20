@@ -70,6 +70,32 @@ int main(void)
                                                                  D3D11_USAGE_DEFAULT, RT, 0, 0}, k15);
     CHECK(p.Width == 1922 && p.Height == 1082 && p.MipLevels == 11, "phys desc %ux%u mips %u", p.Width, p.Height, p.MipLevels);
 
+    /* Э2: кандидат в кэш окна (решает происхождение) — цель + чтение, 1 выборка, 1 mip, 1 слой, без данных и CPU */
+    D3D11_TEXTURE2D_DESC c = tex(20, 20, RT | SRV, D3D11_USAGE_DEFAULT);
+    CHECK(tex_origin_candidate(&c, 0, k15), "20x20 RT+SRV is a candidate");
+    CHECK(!tex_origin_candidate(&c, 1, k15), "with pixels - not a candidate");
+    CHECK(!tex_origin_candidate(&c, 0, k1), "scale 1 - nothing to do");
+    c = tex(20, 20, RT, D3D11_USAGE_DEFAULT);
+    CHECK(!tex_origin_candidate(&c, 0, k15), "RT without SRV - not a window cache");
+    c = tex(20, 20, RT | SRV, D3D11_USAGE_DEFAULT);
+    c.SampleDesc.Count = 4;
+    CHECK(!tex_origin_candidate(&c, 0, k15), "multisampled - not a window cache");
+    c = tex(20, 20, RT | SRV, D3D11_USAGE_DEFAULT);
+    c.MipLevels = 0;
+    CHECK(!tex_origin_candidate(&c, 0, k15), "full mip chain - not a window cache");
+    c = tex(4096, 4096, RT | SRV, D3D11_USAGE_DEFAULT);
+    CHECK(tex_origin_candidate(&c, 0, k2), "window buffer up to 4096 (engine limit), x2 = 8192 fits");
+    c = tex(5000, 20, RT | SRV, D3D11_USAGE_DEFAULT);
+    CHECK(!tex_origin_candidate(&c, 0, k2), "wider than the engine's 4096 - not a window buffer");
+    /* 19.11: глубина вида 3D (eViewport) от «t:create» — тоже, чтобы увеличивалась вместе со своей целью */
+    c = tex(512, 512, DS, D3D11_USAGE_DEFAULT);
+    c.Format = DXGI_FORMAT_R24G8_TYPELESS;
+    CHECK(tex_origin_candidate(&c, 0, k2), "512x512 depth of a 3D view is a candidate");
+    c.BindFlags = DS | SRV;
+    CHECK(tex_origin_candidate(&c, 0, k2), "depth that is also read is a candidate");
+    c.SampleDesc.Count = 4;
+    CHECK(!tex_origin_candidate(&c, 0, k2), "multisampled depth - not a candidate");
+
     printf(fails ? "FAIL %d\n" : "PASS\n", fails);
     return fails != 0;
 }

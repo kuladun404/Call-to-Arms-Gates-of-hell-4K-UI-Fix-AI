@@ -6,6 +6,37 @@
 
 ## Русский
 
+### 2.0 — 20.11.2026
+
+Выпуск 2.0. Всё, что было в бете, плюс чёткие буквы, чёткие иконки и исправления по разбору игры.
+
+**Новое**
+- **Чёткий текст.** Буквы интерфейса рисуются в высоком разрешении, а не растягиваются (файлы `ui4k_fonts2.dat` и `ui4k_fonts4.dat`). Буквы других языков и значки — как в игре.
+- **Чёткие иконки предметов** в инвентаре — как у самой игры в 4K.
+- **Линии интерфейса** (рамка обзора на миникарте) — толщиной в логический пиксель, а не в один пиксель экрана.
+- **Смена масштаба на ходу**: после «Применить» окна, 3D-виды и иконки предметов перерисовываются в новом масштабе, без перезапуска игры.
+- **Запуск сразу в масштабе профиля**: виды 3D и первые буквы больше не остаются в масштабе первой строки списка.
+
+**Исправлено**
+- Кусок мира мигал со сдвигом при начале и конце бега в прямом управлении (смена угла обзора).
+- Освещение и туман портились, когда камера оказывалась над определённым местом карты.
+- Затенение HBAO+ могло мигнуть, когда камера проходила над определёнными координатами.
+- Отражение в воде — в размере игры, как без мода.
+- Глубина резкости в меню паузы больше не роняет FPS (радиус размытия — как у игры, `dof_radius=0`).
+- Счётчик FPS RivaTuner и другие оверлеи больше не сбивают мод.
+- На мониторах 1080p и 1440p в списке нет строк, которые игра всё равно не показывает (меньше 1360×768).
+- Снимок экрана Steam (F12) больше не показывает мир без интерфейса в углу.
+
+**Для проверки**
+- `keys=1` в `ui4k.ini` включает Ctrl+F6 / F7 / F9 / F10 — сравнить с правкой мода и без неё (по умолчанию выключено: в бою F6–F11 — бойцы отряда).
+
+**Что ещё не проверено**
+- Видеокарты AMD и Intel (проверено только на NVIDIA).
+- Монитор 2560×1440 вживую (проверено тестами).
+- Сглаживание MSAA 2x и 8x (4x проверено).
+
+Если что-то не так — пришлите `ui4k.log` из `binaries\x64` и опишите, что делали, какая видеокарта и монитор.
+
 ### 2.0 beta — 17.11.2026
 
 Мод написан заново. Это бета: на NVIDIA и мониторах 4K и 21:9 проверен в игре, остальное — см. «Что ещё не проверено».
@@ -42,6 +73,37 @@
 ---
 
 ## English
+
+### 2.0 — 2026-11-20
+
+The 2.0 release. Everything from the beta plus sharp letters, sharp icons and fixes found by taking the game apart.
+
+**New**
+- **Sharp text.** Interface letters are drawn at high resolution instead of being stretched (files `ui4k_fonts2.dat` and `ui4k_fonts4.dat`). Letters of other languages and icons are as in the game.
+- **Sharp item icons** in the inventory — as the game itself draws them in 4K.
+- **Interface lines** (the view frame on the minimap) are one logical pixel thick, not one screen pixel.
+- **Changing the scale on the fly**: after Apply, windows, 3D views and item icons are redrawn at the new scale, no restart needed.
+- **Starts at the profile's scale**: 3D views and the first letters no longer stay at the scale of the first list entry.
+
+**Fixed**
+- A piece of the world flashed, shifted, at the start and end of a sprint in direct control (field of view change).
+- Lighting and fog went wrong while the camera was over a certain spot of the map.
+- HBAO+ shading could flash while the camera passed over certain coordinates.
+- Water reflection is at the game's size, as without the mod.
+- Depth of field in the pause menu no longer drops FPS (blur radius as the game's, `dof_radius=0`).
+- The RivaTuner FPS counter and other overlays no longer confuse the mod.
+- On 1080p and 1440p monitors the list has no entries the game would not show anyway (smaller than 1360×768).
+- A Steam screenshot (F12) no longer shows the world without the interface in a corner.
+
+**For testing**
+- `keys=1` in `ui4k.ini` enables Ctrl+F6 / F7 / F9 / F10 to compare with and without a mod fix (off by default: in battle F6–F11 select squad members).
+
+**Not tested yet**
+- AMD and Intel graphics (tested on NVIDIA only).
+- A 2560×1440 monitor in person (covered by tests).
+- MSAA 2x and 8x (4x tested).
+
+If something is wrong, send `ui4k.log` from `binaries\x64` and describe what you did, your graphics card and monitor.
 
 ### 2.0 beta — 2026-11-17
 

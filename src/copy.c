@@ -19,6 +19,7 @@ typedef void(STDMETHODCALLTYPE *PFN_CSR)(ID3D11DeviceContext *, ID3D11Resource *
 typedef void(STDMETHODCALLTYPE *PFN_CSR1)(ID3D11DeviceContext *, ID3D11Resource *, UINT, UINT, UINT, UINT,
                                          ID3D11Resource *, UINT, const D3D11_BOX *, UINT);
 typedef void(STDMETHODCALLTYPE *PFN_CR)(ID3D11DeviceContext *, ID3D11Resource *, ID3D11Resource *);
+static __thread void *t_ra;   /* кто вызвал копию (адрес возврата) — только для лога */
 typedef HRESULT(WINAPI *PFN_COMPILE)(const void *, SIZE_T, const char *, const void *, void *, const char *,
                                      const char *, UINT, UINT, ID3DBlob **, ID3DBlob **);
 
@@ -49,7 +50,9 @@ static int blit_init(ID3D11Device *dev)
     if (B.failed) return 0;
     AcquireSRWLockExclusive(&g_blk);
     if (B.dev != dev && !B.failed) {
-        HMODULE m = LoadLibraryW(L"d3dcompiler_47.dll");
+        /* вердикт 19.11, п. 8: как lum.c и diag.c — уже загруженный или системный (System32), не поиск с папки игры */
+        HMODULE m = GetModuleHandleW(L"d3dcompiler_47.dll");
+        if (!m) m = LoadLibraryExW(L"d3dcompiler_47.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
         PFN_COMPILE comp = m ? (PFN_COMPILE)GetProcAddress(m, "D3DCompile") : NULL;
         ID3DBlob *v = NULL, *p = NULL;
         int ok = comp && SUCCEEDED(comp(SRC, sizeof SRC - 1, "blit", NULL, NULL, "vs", "vs_4_0", 0, 0, &v, NULL)) &&
@@ -522,9 +525,12 @@ static void copy_tex(ID3D11DeviceContext *c, int one, UINT flags, ID3D11Resource
 
     if (!same && !ms && (g_cfg.stretch_copy || ts->scaled) && convert(RC(c), dst, td, dsub, &dr, src, ts, ssub, &sr)) {
         if ((!(ts->d.BindFlags & D3D11_BIND_SHADER_RESOURCE) || !(td->d.BindFlags & D3D11_BIND_RENDER_TARGET)) &&
-            InterlockedIncrement(&n_conv) <= 8)
-            LOG("copy: converted through a temporary texture: src real %ux%u bind=0x%x usage=%d -> dst real %ux%u bind=0x%x usage=%d",
-                sr.x1 - sr.x0, sr.y1 - sr.y0, ts->d.BindFlags, ts->d.Usage, dr.x1 - dr.x0, dr.y1 - dr.y0, td->d.BindFlags, td->d.Usage);
+            InterlockedIncrement(&n_conv) <= 8) {
+            char who[64];
+            LOG("copy: converted through a temporary texture: src real %ux%u bind=0x%x usage=%d -> dst real %ux%u bind=0x%x "
+                "usage=%d (by %s)", sr.x1 - sr.x0, sr.y1 - sr.y0, ts->d.BindFlags, ts->d.Usage, dr.x1 - dr.x0, dr.y1 - dr.y0,
+                td->d.BindFlags, td->d.Usage, caller_name(t_ra, who, sizeof who));
+        }
         return;
     }
     /* Г2: копия подресурса целиком при равных настоящих размерах — без области, как её дала игра. Буфер глубины (и
@@ -569,6 +575,8 @@ static void STDMETHODCALLTYPE hk_CopySubresourceRegion(ID3D11DeviceContext *c, I
                                                        UINT y, UINT z, ID3D11Resource *src, UINT ssub,
                                                        const D3D11_BOX *box)
 {
+    t_ra = __builtin_return_address(0);
+    fontpages_vb_touch(dst);   /* Э6: копия вершин букв больше не та */
     region(c, 0, 0, dst, dsub, x, y, z, src, ssub, box);
 }
 
@@ -576,11 +584,15 @@ static void STDMETHODCALLTYPE hk_CopySubresourceRegion1(ID3D11DeviceContext *c, 
                                                         UINT y, UINT z, ID3D11Resource *src, UINT ssub,
                                                         const D3D11_BOX *box, UINT flags)
 {
+    t_ra = __builtin_return_address(0);
+    fontpages_vb_touch(dst);
     region(c, 1, flags, dst, dsub, x, y, z, src, ssub, box);
 }
 
 static void STDMETHODCALLTYPE hk_CopyResource(ID3D11DeviceContext *c, ID3D11Resource *dst, ID3D11Resource *src)
 {
+    t_ra = __builtin_return_address(0);
+    fontpages_vb_touch(dst);
     src = world_read(c, dst, src);
     if (g_cap) diag_copy(c, "CopyResource", dst, src);
     Tex ts, td;
@@ -602,6 +614,7 @@ static void STDMETHODCALLTYPE hk_CopyResource(ID3D11DeviceContext *c, ID3D11Reso
         }
     }
     ORIGC(c, CopyResource, PFN_CR)(RC(c), dst, src);
+    fontpages_copied(c, dst, src);   /* Э6: залитая страница шрифта -> живая (свои ячейки букв) */
 }
 
 /* В0: сведение выборок (ResolveSubresource) между текстурами разного настоящего размера. D3D требует один размер;

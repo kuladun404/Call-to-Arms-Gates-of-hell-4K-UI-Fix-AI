@@ -16,11 +16,12 @@ typedef struct { UINT slot, rad, dim; } DofLay;   /* регистр буфера
 /* {6c2e9a41-0b7d-4f35-8e62-d1a4c3b5f907} */
 static const GUID GUID_DOF = {0x6c2e9a41, 0x0b7d, 0x4f35, {0x8e, 0x62, 0xd1, 0xa4, 0xc3, 0xb5, 0xf9, 0x07}};
 
+/* {e1f3a6c8-7b24-4d09-8c5e-2a9d16b70f44}: страж живого шейдера (pstag.c) */
+static const GUID GUID_DOF_LIVE = {0xe1f3a6c8, 0x7b24, 0x4d09, {0x8c, 0x5e, 0x2a, 0x9d, 0x16, 0xb7, 0x0f, 0x44}};
+
 static DofLay g_lay;                 /* у обоих вариантов шейдера одна раскладка */
 static volatile LONG g_have;         /* игра создала шейдер размытия */
-#define DOF_PS 8
-static void *volatile g_ps[DOF_PS];  /* адреса шейдеров размытия — быстрый отсев в PSSetShader; правду говорит метка */
-static volatile LONG g_nps;
+static PsSet g_set;                  /* живые шейдеры размытия — быстрый отсев в PSSetShader; правду говорит метка */
 
 static int on(void) { return g_cfg.dof_radius > 0 && g_have; }
 
@@ -38,7 +39,7 @@ static HRESULT STDMETHODCALLTYPE hk_CreatePixelShader(ID3D11Device *d, const voi
         DofLay x = {r.slot, r.offset / 4, w.offset / 4};
         ID3D11PixelShader_SetPrivateData(*o, &GUID_DOF, sizeof x, &x);
         g_lay = x;
-        g_ps[(InterlockedIncrement(&g_nps) - 1) % DOF_PS] = *o;
+        psset_add(&g_set, *o, &GUID_DOF_LIVE, "dof: blur");
         InterlockedExchange(&g_have, 1);
         static volatile LONG said;
         if (InterlockedIncrement(&said) <= 4)
@@ -60,12 +61,9 @@ static void STDMETHODCALLTYPE hk_PSSetShader(ID3D11DeviceContext *c, ID3D11Pixel
     CtxState *s = &CTXW(c)->st;
     s->ps = ps;
     s->ps_dof = 0;
-    if (ps && g_have) {
-        if (g_nps > DOF_PS) s->ps_dof = -1;   /* ревизия кода 4, п. 3: адресов больше, чем помнит отсев, — метку спросим всегда */
-        else
-            for (int i = 0; i < DOF_PS; i++)
-                if (g_ps[i] == ps) { s->ps_dof = -1; break; }   /* похоже — спросим метку при рисовании */
-    }
+    s->ps_box = box_ps_hint(ps);   /* Э8: тот же хук — шейдер копирования с шагом (box.c) */
+    /* похоже — спросим метку при рисовании (вердикт 19.11, п. 1: набор живых шейдеров, не счётчик созданных) */
+    if (ps && g_have && psset_maybe(&g_set, ps)) s->ps_dof = -1;
     ORIGC(c, PSSetShader, PFN_PSS)(RC(c), ps, ci, n);
 }
 
@@ -81,7 +79,7 @@ static int ps_is_dof(CtxState *s)
 
 void dof_install(void)
 {
-    if (g_cfg.dof_radius > 0) CTX_HOOK(PSSetShader, hk_PSSetShader);
+    if (g_cfg.dof_radius > 0 || box_on()) CTX_HOOK(PSSetShader, hk_PSSetShader);   /* текущий PS нужен и box.c */
 }
 
 /* ---- копии буфера сцены ---- */
@@ -133,7 +131,16 @@ static void put(ID3D11DeviceContext *c, ID3D11Resource *r, const float *f, UINT 
         }
     } else if (d.Usage == D3D11_USAGE_DEFAULT) {
         ID3D11DeviceContext_UpdateSubresource(RC(c), r, 0, NULL, f, 0, 0);
-    }
+    } else return;
+    box_overwritten(c, r);   /* Э8: правка шага в этом буфере тоже затёрта */
+}
+
+/* box.c переписал буфер: правки радиуса в нём больше нет */
+void dof_overwritten(ID3D11DeviceContext *c, ID3D11Resource *r)
+{
+    CtxState *s = &CTXW(c)->st;
+    for (int i = 0; i < DOF_W; i++)
+        if (s->dofw[i].r == r) s->dofw[i].adj = 0;
 }
 
 /* что игра считает радиусом на каждой строке — по разу на значение (данные для формулы радиуса) */
@@ -148,16 +155,23 @@ static void say(float lrad, float rad, float ldim, float dim)
     LOG("dof: blur radius %g -> %g (blur image %g -> %g wide, radius x %g)", lrad, rad, ldim, dim, rad / lrad);
 }
 
+/* в буфере правка радиуса — вернуть числа игры. Перед следующим рисованием другим шейдером, а также (вердикт 19.11,
+ * п. 2) перед концом списка команд и перед исполнением чужого: копии контекста тут же забываются (dof_ctx_forget) */
+void dof_restore(ID3D11DeviceContext *c)
+{
+    CtxState *s = &CTXW(c)->st;
+    if (!s->dof_adj) return;
+    for (int i = 0; i < DOF_W; i++)
+        if (s->dofw[i].r && s->dofw[i].adj) { put(c, s->dofw[i].r, s->dofw[i].f, s->dofw[i].n); s->dofw[i].adj = 0; }
+    s->dof_adj = 0;
+}
+
 void dof_pre_draw(ID3D11DeviceContext *c)
 {
     if (!on()) return;
     CtxState *s = &CTXW(c)->st;
     if (!ps_is_dof(s)) {
-        if (s->dof_adj) {   /* прошлое рисование было размытием: вернуть буфер игры */
-            for (int i = 0; i < DOF_W; i++)
-                if (s->dofw[i].r && s->dofw[i].adj) { put(c, s->dofw[i].r, s->dofw[i].f, s->dofw[i].n); s->dofw[i].adj = 0; }
-            s->dof_adj = 0;
-        }
+        dof_restore(c);   /* прошлое рисование было размытием: вернуть буфер игры */
         return;
     }
     ID3D11Buffer *b = NULL;
@@ -191,6 +205,7 @@ void dof_reset(ID3D11DeviceContext *c)
     CtxState *s = &CTXW(c)->st;
     s->ps = NULL;
     s->ps_dof = 0;
+    s->ps_box = 0;
 }
 
 void dof_ctx_forget(ID3D11DeviceContext *c)

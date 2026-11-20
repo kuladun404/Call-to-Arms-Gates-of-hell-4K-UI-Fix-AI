@@ -32,10 +32,13 @@ DEF_GIC(hk_GetImmediateContext3, h_gic3)
 void device_hook(ID3D11Device *dev)
 {
     res_hook_device(dev);
+    res_origin_init();                         /* Э2: «t:create» в exe — один раз */
+    fontpages_hook_device(dev);                /* Э6: виды рабочих страниц шрифтов */
     anchors_hook_device(dev);                  /* буферы констант библиотеки HBAO+ — их размер */
     lum_hook_device(dev);
     world_hook_device(dev);                    /* раньше diag: diag видит шейдер игры, а не подмену */
     dof_hook_device(dev);                      /* Г4: шейдер размытия глубины резкости — по имени переменной */
+    box_hook_device(dev);                      /* Э8: шейдер копирования с шагом one_pixel — по именам переменных */
     if (g_cfg.diag) diag_hook_device(dev);
     VT_PATCH(dev, ID3D11DeviceVtbl, CreateDeferredContext, hk_CreateDeferredContext, &h_cdc);
     VT_PATCH(dev, ID3D11DeviceVtbl, GetImmediateContext, hk_GetImmediateContext, &h_gic);

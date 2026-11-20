@@ -36,11 +36,12 @@ CTX_THUNKS = 192  # >= слотов ID3D11DeviceContext4Vtbl (static_assert в c
 SOURCES = ["proxy.c", "config.c", "log.c", "scale.c", "vt.c", "ctx.c", "device.c", "screen.c", "classify.c",
            "resources.c", "swapchain.c", "iat.c", "overlay.c", "viewport.c",
            "cbfix.c", "cb.c", "fmt.c", "upload.c", "profile.c", "dpi.c", "input.c", "copy.c", "cursor.c", "modes.c", "diag.c", "draw.c", "lum.c", "loc.c", "world.c",
-           "dxbc.c", "dof.c", "gamedata.c", "anchors.c", "d3dbg.c"]
+           "dxbc.c", "pstag.c", "dof.c", "box.c", "rtti.c", "views.c", "gamedata.c", "anchors.c", "d3dbg.c", "perf.c", "origin.c", "fontpages.c", "fontpages_core.c"]
 HLSL = {"lum_tile": "lum_tile.hlsl", "lum_hist": "lum_hist.hlsl"}  # compute-шейдеры -> байткод в gen/lum_cs.h
 CC = [sys.executable, "-m", "ziglang", "cc", "-target", "x86_64-windows-gnu"]
-VERSION = "2.0-beta"
-INSTALLED = ["d3d11.dll", "ui4k.ini"]          # что кладём в binaries\x64
+VERSION = "2.0"
+INSTALLED = ["d3d11.dll", "ui4k.ini", "ui4k_fonts2.dat", "ui4k_fonts4.dat"]   # что кладём в binaries\x64
+FONT_DATA = OUT / "fontpages"                # образцы букв Э6 (файлы ui4k_fonts*.dat из архива выпуска)
 LEFTOVERS = ["ui4k.log", "ui4k.2.log", "ui4k.3.log", "ui4k.4.log", "ui4k_cs.txt", "ui4k_vs.txt", "ui4k_labels.pak"]  # что создаёт мод при работе
 
 
@@ -62,7 +63,12 @@ def write_fake_pak(path, extra=()):
     ui = ["vs[VS]$VCOLOR$VTEXCOORDS#0$TEXCOORDS#0$USE_VCOLOR", "vs[VS]$TEXCOORDS#1$VTEXCOORDS#1$USE_VCOLOR$VNORMAL$VCOLOR",
           "vs[VS]$VNORMAL$VCOLOR$VTEXCOORDS#1$TEXCOORDS#1$USE_VCOLOR"]
     with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as z:
-        z.writestr("shader/dx10/shader_constants.h", "// game after an update\n#define pscSceneGroup\t_PSG(pscgScene, 40)\n")
+        z.writestr("shader/dx10/shader_constants.h", "// game after an update\n#define pscSceneGroup\t_PSG(pscgScene, 40)\n"
+                   "#define pscDOFParams\t\t_PSC(pscgScene, 18)\n#define pscLELightPos\t_PSC(pscgScene, 5)\n")
+        # Э3: места экранных чисел по именам переменных — регистры переехали (c2.x, pscLELightPos.z, pscDOFParams.y)
+        z.writestr("shader/dx10/postprocess/copy.hlsl", "float2 src_size : packoffset(c2.x);\n")
+        z.writestr("shader/dx10/postprocess/lenseffects/lens_effects.hlsl", "float2 textureDims_LR\t: packoffset(pscLELightPos.z);\n")
+        z.writestr("shader/dx10/postprocess/dof/dof_blur.hlsl", "float2\t\t  textureDimensions\t\t: packoffset(pscDOFParams.y);\n")
         z.writestr(cache_name(ui[0]) + ".vso", cache_entry(ui[0], dxbc))
         z.writestr(cache_name(ui[1]) + ".vso", cache_entry("vs[VS]$SOMETHING_ELSE", dxbc))   # чужое имя внутри
         z.writestr(zipfile.ZipInfo(cache_name(ui[2]) + ".vso"), cache_entry(ui[2], dxbc), compress_type=zipfile.ZIP_DEFLATED)
@@ -169,10 +175,12 @@ def version():
     return f"{VERSION}-{d.replace('-', '.')}-{h}" + ("+" if git("status", "--porcelain", "--untracked-files=no") else "")
 
 
-def build():
+def build(pdb=False):
+    """pdb — с файлом символов out/d3d11.pdb: имена функций мода для профилировщика (perf\\goh_prof.exe).
+    Машинный код тот же (-g его не меняет), но в DLL записан путь к .pdb — такую сборку игрокам не давать"""
     gen, n = generate()
     dll = OUT / "d3d11.dll"
-    cmd = [*CC, "-shared", "-O2", "-Wall", "-Wextra", "-Wno-unused-parameter", f'-DUI4K_VERSION="{version()}"',
+    cmd = [*CC, "-shared", "-O2", *(["-g"] if pdb else []), "-Wall", "-Wextra", "-Wno-unused-parameter", f'-DUI4K_VERSION="{version()}"',
            "-I", str(SRC), "-I", str(gen),
            *[str(SRC / s) for s in SOURCES], str(gen / "stubs.S"),
            "-o", str(dll), "-luser32", "-lkernel32", "-lgdi32", "-ldxguid", "-luuid", "-lshell32", "-lbcrypt"]
@@ -239,9 +247,33 @@ def run_tests(dll, debug=False):
     run("scale (дробный масштаб, округление)", compile_("test_scale", TESTS / "test_scale.c", SRC / "scale.c"))
     run("classify (какие текстуры масштабируются)",
         compile_("test_classify", TESTS / "test_classify.c", SRC / "classify.c", SRC / "scale.c"))
+    # Э2: поиск «t:create» на искусственном образе и в настоящем exe игры (если она установлена)
+    try:
+        real_exe = find_game() / "binaries" / "x64" / "call_to_arms.exe"
+    except (SystemExit, Exception):
+        real_exe = None
+    fp_dat = FONT_DATA / "ui4k_fonts2.dat"
+    run("fontpages: sample file, page fingerprint, own letter cells: atlas, xk from samples, engine strips (E6)",
+        compile_("test_fontpages", TESTS / "test_fontpages.c", SRC / "fontpages_core.c"), *([str(fp_dat)] if fp_dat.exists() else []))
+    fd_exe = compile_("test_fontdll", TESTS / "test_fontdll.c", SRC / "fontpages_core.c", libs=("-ldxguid", "-luuid"))
+    with tempfile.TemporaryDirectory(prefix="ui4k_v2_") as t:   # ревизия v3, пп. 1, 4, 5, 6
+        shutil.copy2(dll, Path(t) / "d3d11.dll")
+        run("fonts through the DLL: own letters with other keys off, a changed page refused by CRC32, no copy of a "
+            "deferred-context vertex buffer, the waiting page held (review v3)", fd_exe, t)
+    of_exe = compile_("test_origin_find", TESTS / "test_origin_find.c", SRC / "origin.c")
+    run("origin: \"t:create\" -> reference -> function by unwind table (E2)", of_exe,
+        *([real_exe] if real_exe and real_exe.exists() else []))
+    og_exe = compile_("test_origin", TESTS / "test_origin.c", libs=("-ldxgi", "-ldxguid", "-luuid"))
+    for mode, name in (("", "window caches of any shape made by \"t:create\" are enlarged, others by shape (E2)"),
+                       ("off", "origin=0: shape rule only, no search (E2)")):
+        with tempfile.TemporaryDirectory(prefix="ui4k_v2_") as t:
+            shutil.copy2(dll, Path(t) / "d3d11.dll")
+            run(name, og_exe, t, *([mode] if mode else []))
     run("cbfix (экранные пары в CB)", compile_("test_cbfix", TESTS / "test_cbfix.c", SRC / "cbfix.c"))
     run("dxbc: constant-buffer variable by name from shader reflection (G4)",
         compile_("test_dxbc", TESTS / "test_dxbc.c", SRC / "dxbc.c", libs=("-ldxguid", "-luuid")))
+    run("rtti: game classes by MSVC RTTI name, their objects, the handler's gate byte (E9)",
+        compile_("test_rtti", TESTS / "test_rtti.c", SRC / "rtti.c"))
     with tempfile.TemporaryDirectory(prefix="ui4k_v2_") as t:   # устойчивость к обновлениям: архив шейдеров игры
         fake = Path(t) / "shader.pak"
         write_fake_pak(fake)
@@ -266,6 +298,18 @@ def run_tests(dll, debug=False):
         shutil.copy2(dll, Path(t) / "d3d11.dll")
         (Path(t) / "ui4k.ini").write_text("[ui4k]\ngame_hdr=1\ngame_aa=0\nenabled=1\nscale=1.5\nlog=1\nfit_native=0\n")   # ровно 3/2 на любом мониторе
         run("swapchain + textures + CB x1.5 (F04/F05/F08)", res_exe, t)
+        # В1: мод объявил процесс понимающим DPI и пишет настоящий масштаб Windows (а не 100% непонимающего процесса)
+        u32 = ctypes.WinDLL("user32")
+        u32.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+        old = u32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))
+        real_scale = u32.GetDpiForSystem() * 100 // 96
+        u32.SetThreadDpiAwarenessContext(ctypes.c_void_p(old))
+        m = re.search(r"dpi: process (?:was \S+, now|is) (.+?)(?: - could not change it)? \(Windows scale (\d+)%\)",
+                      (Path(t) / "ui4k.log").read_text(errors="replace"))
+        ok = bool(m) and "per-monitor" in m[1] and int(m[2]) == real_scale
+        print(f"{'PASS' if ok else 'FAIL'}  dpi: process DPI aware, log shows the real Windows scale {real_scale}% "
+              f"({m[0] if m else 'no dpi line'})")
+        fails += not ok
         vp_exe = compile_("test_vp", TESTS / "test_vp.c", libs=("-ldxguid", "-luuid"))
         run("viewport/scissor x1.5 (F07, рисование)", vp_exe, t)
         in_exe = compile_("test_input", TESTS / "test_input.c", libs=("-luser32", "-ldxguid", "-luuid"))
@@ -362,6 +406,13 @@ def run_tests(dll, debug=False):
             ini += "cb_fix=300,84@" if mode == "dofbig" else ""
             (Path(t) / "ui4k.ini").write_text(ini.replace("@", chr(10)))
             run(f"depth of field blur: {title} (G4)", bd_exe, t, mode)
+    for mode, extra, title in (("box", "", "copy shader steps by the real texels of an enlarged source"),
+                               ("box0", "box_step=0@", "box_step=0: the game's step")):
+        with tempfile.TemporaryDirectory(prefix="ui4k_v2_") as t:   # Э8: шаг уменьшения иконок инвентаря
+            shutil.copy2(dll, Path(t) / "d3d11.dll")
+            ini = "[ui4k]@game_hdr=1@game_aa=0@enabled=1@scale=1.5@log=1@fit_native=0@" + extra
+            (Path(t) / "ui4k.ini").write_text(ini.replace("@", chr(10)))
+            run(f"inventory icons: {title} (E8)", bd_exe, t, mode)
 
     # F03: список режимов настоящего монитора (без монитора — пропуск)
     md_exe = compile_("test_modes", TESTS / "test_modes.c", SRC / "scale.c",
@@ -377,8 +428,20 @@ def run_tests(dll, debug=False):
     ps_exe = compile_("test_presets", TESTS / "test_presets.c", libs=("-luser32", "-lgdi32", "-ldxguid", "-luuid"))
     with tempfile.TemporaryDirectory(prefix="ui4k_v2_") as t:
         shutil.copy2(dll, Path(t) / "d3d11.dll")
-        (Path(t) / "ui4k.ini").write_text("[ui4k]\ngame_hdr=1\ngame_aa=0\nenabled=1\nscale=1.5\nlog=2\nall_monitors=0\n")
+        (Path(t) / "prof").mkdir()   # свой пустой профиль: не профиль игрока на этом ПК (его строка влияет на запуск)
+        (Path(t) / "ui4k.ini").write_text("[ui4k]\ngame_hdr=1\ngame_aa=0\nenabled=1\nscale=1.5\nlog=2\nall_monitors=0\n"
+                                          f"test_profiles={Path(t) / 'prof'}\n")
         run("presets: world + interface per entry (L8)", ps_exe, t)
+    with tempfile.TemporaryDirectory(prefix="ui4k_v2_") as t:   # 19.11: запуск — наименьшая строка, затем строка профиля
+        shutil.copy2(dll, Path(t) / "d3d11.dll")
+        (Path(t) / "prof" / "1").mkdir(parents=True)
+        (Path(t) / "prof" / "1" / "options.set").write_text(
+            '{options\n\t{video\n\t\t{resolution\n\t\t\t{custom_mode "1280x720"}\n\t\t\t{mode "1920x1080"}\n\t\t}\n'
+            '\t\t{hdr 1}\n\t\t{antialiasing none}\n\t}\n}\n')
+        (Path(t) / "ui4k.ini").write_text("[ui4k]\nenabled=1\nlog=2\ntest_monitor=3840x2160\nall_monitors=0\n"
+                                          f"test_profiles={Path(t) / 'prof'}\n")
+        run("start: the game opens on the least entry (eDeviceScreen), the mod takes the profile entry's scale at once",
+            ps_exe, t, "--startup", "1920x1080")
     # С5: в списке Windows есть режим больше монитора (DSR / VSR) — монитором остаётся рабочий стол
     with tempfile.TemporaryDirectory(prefix="ui4k_v2_") as t:
         shutil.copy2(dll, Path(t) / "d3d11.dll")
@@ -395,7 +458,7 @@ def run_tests(dll, debug=False):
         shutil.copy2(dll, Path(t) / "d3d11.dll")
         (Path(t) / "prof" / "1").mkdir(parents=True)
         (Path(t) / "prof" / "1" / "options.set").write_text(
-            '{options\n\t{video\n\t\t{resolution\n\t\t\t{custom_mode "1280x720"}\n\t\t\t{mode "1720x720"}\n\t\t}\n'
+            '{options\n\t{video\n\t\t{resolution\n\t\t\t{custom_mode "1280x720"}\n\t\t\t{mode "2580x1080"}\n\t\t}\n'
             '\t\t{hdr 1}\n\t\t{antialiasing none}\n\t}\n}\n')
         (Path(t) / "ui4k.ini").write_text("[ui4k]\nenabled=1\nlog=2\ntest_monitor=3840x2160\ntest_monitor2=3440x1440\n"
                                           f"test_profiles={Path(t) / 'prof'}\n")
@@ -428,6 +491,10 @@ def run_tests(dll, debug=False):
         shutil.copy2(dll, Path(t) / "d3d11.dll")
         (Path(t) / "ui4k.ini").write_text("[ui4k]\ngame_hdr=1\ngame_aa=0\nenabled=1\nscale=1.5\nlog=1\nfit_native=0\ndiag_at=1\n")
         run("diag frame capture (F14)", dg_exe, t)
+    with tempfile.TemporaryDirectory(prefix="ui4k_v2_") as t:   # 20.11: «запись прошлого»
+        shutil.copy2(dll, Path(t) / "d3d11.dll")
+        (Path(t) / "ui4k.ini").write_text("[ui4k]\ngame_hdr=1\ngame_aa=0\nenabled=1\nscale=1.5\nlog=1\nfit_native=0\ndiag_ring=1\ndiag_at=120\n")
+        run("diag ring: the last frames kept in memory, written on Ctrl+F11 (flash hunt 20.11)", dg_exe, t, "ring")
 
     # F14/L8: мир без HDR — своя цель мира, переход на первом рисовании интерфейса
     # устойчивость к обновлениям игры: «игра после обновления» через собранную DLL
@@ -474,6 +541,16 @@ def run_tests(dll, debug=False):
     with tempfile.TemporaryDirectory(prefix="ui4k_v2_") as t:
         shutil.copy2(dll, Path(t) / "d3d11.dll")
         run("msaa_safe=1: safe mode, world at interface size (B0)", wo_exe, t, "msaa_safe")
+    with tempfile.TemporaryDirectory(prefix="ui4k_v2_") as t:   # Э1: режим замеров
+        shutil.copy2(dll, Path(t) / "d3d11.dll")
+        run("perf=1: frame times, GPU time of frame, interface and own world copy, census of x1 caches in xk targets (E1)",
+            wo_exe, t, "perf")
+    for mode, name in (("lines", "interface lines (minimap frame) drawn as thick as a logical pixel: 3 draws at x1.5 (E5)"),
+                       ("lines_off", "thick_lines=0: interface line drawn once (E5)"),
+                       ("lines_nopre", "presets=0, world = screen: interface lines still thick (review 19.11, 6)")):
+        with tempfile.TemporaryDirectory(prefix="ui4k_v2_") as t:
+            shutil.copy2(dll, Path(t) / "d3d11.dll")
+            run(name, wo_exe, t, mode)
 
     # L8: свой пакет подписей в localizations
     loc_exe = compile_("test_loc", TESTS / "test_loc.c")
@@ -601,6 +678,11 @@ def install(dll, game_root=None):
         print(f"бэкап: {saved or 'нечего сохранять'} -> {bdir}")
     shutil.copy2(dll, x64 / "d3d11.dll")
     shutil.copy2(ROOT / "ui4k.ini", x64 / "ui4k.ini")
+    for f in ("ui4k_fonts2.dat", "ui4k_fonts4.dat"):   # Э6: без них — страницы шрифтов игры
+        if (FONT_DATA / f).exists():
+            shutil.copy2(FONT_DATA / f, x64 / f)
+        else:
+            print(f"нет {FONT_DATA / f} - чёткие шрифты не установлены (положите файлы из архива выпуска)")
     print(f"установлено в {x64}")
 
 
@@ -659,7 +741,7 @@ def uninstall(game_root=None, pdir=None, udir=None):
     if not manifest.exists():
         sys.exit(f"нет {manifest}: мод v2 не ставился этим скриптом, удалять нечего")
     m = json.loads(manifest.read_text())
-    for f in m["installed"] + LEFTOVERS:
+    for f in sorted(set(m["installed"]) | set(INSTALLED)) + LEFTOVERS:   # и файлы, добавленные позже (образцы букв Э6)
         if (x64 / f).exists():
             (x64 / f).unlink()
     for f in m["saved"]:
@@ -678,7 +760,8 @@ def uninstall(game_root=None, pdir=None, udir=None):
 
 
 # ---------------- архив для игроков ----------------
-PACKAGE_FILES = {"binaries/x64/d3d11.dll", "binaries/x64/ui4k.ini", "README_RU.txt", "README_EN.txt"}
+PACKAGE_FILES = {"binaries/x64/d3d11.dll", "binaries/x64/ui4k.ini", "binaries/x64/ui4k_fonts2.dat",
+                 "binaries/x64/ui4k_fonts4.dat", "README_RU.txt", "README_EN.txt"}
 
 
 def player_text(path, ver):
@@ -699,6 +782,10 @@ def package(dll, out_dir=None):
     with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(dll, "binaries/x64/d3d11.dll")
         z.writestr("binaries/x64/ui4k.ini", ini)
+        for f in ("ui4k_fonts2.dat", "ui4k_fonts4.dat"):   # Э6: образцы букв
+            if not (FONT_DATA / f).exists():
+                sys.exit(f"нет {FONT_DATA / f} - положите файлы букв из архива выпуска в {FONT_DATA}")
+            z.write(FONT_DATA / f, "binaries/x64/" + f)
         for name in ("README_RU.txt", "README_EN.txt"):
             z.writestr(name, player_text(ROOT / "package" / name, ver))
     problems = check_package(zp, dll, ver)
@@ -742,11 +829,14 @@ if __name__ == "__main__":
     g.add_argument("--uninstall", action="store_true")
     g.add_argument("--package", action="store_true", help="архив для игроков в out/package (только файлы, без программ)")
     ap.add_argument("--debug-layer", action="store_true", help="с --test: слой отладки Direct3D, его сообщения по тестам")
+    ap.add_argument("--pdb", action="store_true", help="с файлом символов (имена функций для профилировщика); не для --package")
     a = ap.parse_args()
+    if a.pdb and a.package:
+        sys.exit("--pdb не для архива игроков: в DLL был бы путь к .pdb на этом компьютере")
     if a.uninstall:
         uninstall()
     else:
-        d = build()
+        d = build(a.pdb)
         if a.test:
             sys.exit(1 if run_tests(d, a.debug_layer) else 0)
         if a.install:

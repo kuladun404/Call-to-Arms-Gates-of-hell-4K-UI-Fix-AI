@@ -201,11 +201,23 @@ int main(int argc, char **argv)
     cache_path("postprocess/histogram[HistogramBinsCS]", "cso", ent2);
     unsigned char *e2 = cache_entry("postprocess/histogram[HistogramBinsCS]", ID3D10Blob_GetBufferPointer(cb_),
                                     ID3D10Blob_GetBufferSize(cb_), &e2len);
-    Ent z[4] = {{"shader/dx10/shader_constants.h", consts, sizeof consts - 1}, {ent, e, elen},
-                {"shader/dx10/postprocess/histogram.hlsl", hist, sizeof hist - 1}, {ent2, e2, e2len}};
+    static const char copy_src[] = "float2 src_size : packoffset(c5.x);\nfloat2 one_pixel : packoffset(c5.z);\n";
+    static const char dof_src[] = "float2 textureDimensions : packoffset(c24.y);\n";
+    static const char gauss_src[] = "float2 halfPixel : packoffset(c0);\n";
+    static const char lum_src[] = "float2 textureDimension : packoffset(c14);\n";
+    static const char sky_src[] = "float4 sunMoonPosRes : packoffset(c17);\n";
+    static const char fxaa_src[] = "float2 fxaaNormPixelWidthHeight : packoffset(c37.z);\n";
+    Ent z[10] = {{"shader/dx10/shader_constants.h", consts, sizeof consts - 1}, {ent, e, elen},
+                 {"shader/dx10/postprocess/histogram.hlsl", hist, sizeof hist - 1}, {ent2, e2, e2len},
+                 {"shader/dx10/postprocess/copy.hlsl", copy_src, sizeof copy_src - 1},
+                 {"shader/dx10/postprocess/dof/dof_blur.hlsl", dof_src, sizeof dof_src - 1},
+                 {"shader/dx10/postprocess/gauss_blur.hlsl", gauss_src, sizeof gauss_src - 1},
+                 {"shader/dx10/postprocess/luma.hlsl", lum_src, sizeof lum_src - 1},
+                 {"shader/dx10/sky.hlsl", sky_src, sizeof sky_src - 1},
+                 {"shader/dx10/postprocess/lenseffects/lens_effects.hlsl", fxaa_src, sizeof fxaa_src - 1}};
     int real = argc > 3 && !strcmp(argv[2], "real");
     if (real) lstrcpynA(pak, argv[3], MAX_PATH);   /* архив настоящей игры, поддельный не пишем */
-    else CHECK(write_zip(pak, z, 4), "archive not written");
+    else CHECK(write_zip(pak, z, 10), "archive not written");
     snprintf(path, sizeof path, "%s\\ui4k.ini", dir);
     FILE *f = fopen(path, "wb");
     fprintf(f, "[ui4k]\nenabled=1\nscale=1.5\nlog=2\npresets=0\nfit_native=0\nrender=50\ngame_hdr=1\ngame_aa=0\ntest_shader_pak=%s\n", pak);
@@ -239,12 +251,17 @@ int main(int argc, char **argv)
     /* 2. буфер сцены 160 чисел: экранная пара (1280, 720) -> (1920, 1080) */
     float in[160] = {0}, out[160] = {0};
     in[20] = 1280; in[21] = 720; in[100] = 7;
+    in[40] = 1280; in[41] = 720;   /* Э3: та же пара не в экранном месте (не из имён шейдеров) — не трогать */
     D3D11_BUFFER_DESC bd = {sizeof in, D3D11_USAGE_DYNAMIC, D3D11_BIND_CONSTANT_BUFFER, D3D11_CPU_ACCESS_WRITE, 0, 0};
     ID3D11Buffer *cb = NULL;
     ID3D11Device_CreateBuffer(dev, &bd, NULL, &cb);
     cb_roundtrip(dev, ctx, cb, in, out, 160);
     printf("scene buffer 160 floats: pair (%g, %g), other value %g\n", out[20], out[21], out[100]);
     CHECK(out[20] == 1920 && out[21] == 1080 && out[100] == 7, "scene buffer of the updated size not fixed");
+    CHECK(out[40] == 1280 && out[41] == 720, "E3: pair outside the named places left alone: %g %g", out[40], out[41]);
+    read_log();
+    CHECK(strstr(g_log, "screen numbers of the scene buffer at floats 0, 20, 22, 56, 70, 97, 150"),
+          "E3: places by name from the archive's shader sources");
 
     /* 3. HBAO+: буфер на 100 чисел создаёт библиотека; радиус на [44] */
     snprintf(path, sizeof path, "%s\\GFSDK_SSAO_fake.win64.dll", dir);

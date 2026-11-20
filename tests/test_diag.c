@@ -1,6 +1,8 @@
 /* Разведка F14: снимок кадра (diag_at=1) через собранную d3d11.dll на WARP.
- *   test_diag.exe <папка с d3d11.dll и ui4k.ini>
- * Рисует очистку, Draw и копию между Present, потом проверяет ui4k.log. Последняя строка PASS/FAIL. */
+ *   test_diag.exe <папка с d3d11.dll и ui4k.ini> [ring]
+ * Рисует очистку, Draw и копию между Present, потом проверяет ui4k.log. Последняя строка PASS/FAIL.
+ * ring (20.11): diag_ring=1 (МБ), diag_at=120 — снимок всё время в буфер, на 120-м кадре буфер в ui4k_ring_1.txt; в нём
+ * последние кадры, первые затёрты, в логе рисований нет. */
 #define COBJMACROS
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,7 +21,8 @@ static int fails;
 int main(int argc, char **argv)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
-    if (argc < 2) { printf("usage: test_diag <dir>\nFAIL\n"); return 2; }
+    if (argc < 2) { printf("usage: test_diag <dir> [ring]\nFAIL\n"); return 2; }
+    int ring = argc > 2 && !strcmp(argv[2], "ring");
     char path[MAX_PATH];
     snprintf(path, sizeof path, "%s\\d3d11.dll", argv[1]);
     HMODULE m = LoadLibraryA(path);
@@ -87,14 +90,28 @@ int main(int argc, char **argv)
     ID3D11DeviceContext_RSSetViewports(ctx, 1, &dvp);
     ID3D11DeviceContext_PSSetShader(ctx, ps, NULL, 0);
     const float col[4] = {0, 0, 1, 1};
-    for (int f = 0; f < 4; f++) {
+    ID3D11Buffer *cam = NULL;   /* буфер сцены VS игры (232 числа): позиция камеры c2, матрица вида c3..c6 */
+    static float camf[232];
+    if (ring) {   /* ножницы заданы (не включены в состоянии растеризации) — в строке рисования «sc=» */
+        D3D11_RECT scr = {0, 0, 320, 180};
+        ID3D11DeviceContext_RSSetScissorRects(ctx, 1, &scr);
+        D3D11_BUFFER_DESC cd = {232 * 4, D3D11_USAGE_DEFAULT, D3D11_BIND_CONSTANT_BUFFER, 0, 0, 0};
+        ID3D11Device_CreateBuffer(dev, &cd, NULL, &cam);
+        CHECK(cam != NULL, "scene buffer 232");
+    }
+    for (int f = 0; f < (ring ? 120 : 4); f++) {
+        if (cam) {   /* камера кадра f: позиция (f, 2, 3), первый элемент матрицы 1.25 */
+            camf[8] = (float)f; camf[9] = 2; camf[10] = 3; camf[12] = 1.25f;
+            ID3D11DeviceContext_UpdateSubresource(ctx, (ID3D11Resource *)cam, 0, NULL, camf, 0, 0);
+        }
         ID3D11DeviceContext_ClearRenderTargetView(ctx, rtv, col);
         ID3D11DeviceContext_OMSetRenderTargets(ctx, 1, &rtv, NULL);
         ID3D11DeviceContext_IASetPrimitiveTopology(ctx, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        ID3D11DeviceContext_Draw(ctx, 3, 0);
+        for (int d = 0; d < (ring ? 100 : 1); d++) ID3D11DeviceContext_Draw(ctx, 3, 0);
         ID3D11DeviceContext_CopyResource(ctx, (ID3D11Resource *)bb, (ID3D11Resource *)scene);
         IDXGISwapChain_Present(sc, 0, 0);
     }
+    if (cam) ID3D11Buffer_Release(cam);
     if (ps) ID3D11PixelShader_Release(ps);
     if (vs) ID3D11VertexShader_Release(vs);
     if (smp) ID3D11SamplerState_Release(smp);
@@ -112,6 +129,28 @@ int main(int argc, char **argv)
     size_t n = lf ? fread(log, 1, sizeof log - 1, lf) : 0;
     if (lf) fclose(lf);
     log[n] = 0;
+    if (ring) {   /* 20.11: «запись прошлого» */
+        CHECK(strstr(log, "diag ring: the last 1 MB of frames are kept in memory"), "ring announced");
+        CHECK(strstr(log, "(up to frame 120) written to ui4k_ring_1.txt (Ctrl+F11 #1)"), "ring written at frame 120");
+        CHECK(!strstr(log, " Draw 3/0 rt=") && !strstr(log, "diag: capture start"), "draws go to the ring, not to the log");
+        snprintf(path, sizeof path, "%s\\ui4k_ring_1.txt", argv[1]);
+        static char rb[2 << 20];
+        lf = fopen(path, "rb");
+        n = lf ? fread(rb, 1, sizeof rb - 1, lf) : 0;
+        if (lf) fclose(lf);
+        rb[n] = 0;
+        printf("ring file: %zu bytes\n", n);
+        CHECK(n > 900000 && n <= (1 << 20), "ring file about 1 MB: %zu", n);
+        CHECK(rb[0] == '[', "ring file starts with a whole line");
+        CHECK(strstr(rb, "=== frame 120 ") && strstr(rb, "=== frame 119 "), "last frames kept");
+        CHECK(!strstr(rb, "=== frame 1 ") && !strstr(rb, "=== frame 2 "), "first frames overwritten");
+        char *last = strstr(rb, "=== frame 119 ");
+        CHECK(last && strstr(last, " Draw 3/0 rt=[ 0=") && strstr(last, " sc="), "draw lines with scissor between the last frames");
+        /* 20.11: камера кадра 119 — запись буфера сцены VS с числами 8..27 (позиция 119 2 3 0, матрица 1.25 ...) */
+        CHECK(last && strstr(last, ": 119 2 3 0 1.25 0"), "camera of the frame recorded from the 232-float scene buffer");
+        printf(fails ? "FAIL %d\n" : "PASS\n", fails);
+        return fails != 0;
+    }
     CHECK(strstr(log, "diag: capture start"), "capture start");
     CHECK(strstr(log, "diag: capture end"), "capture end");
     char *d = strstr(log, " Draw 3/0 rt=[ 0=");

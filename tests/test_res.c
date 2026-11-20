@@ -194,6 +194,9 @@ int main(int argc, char **argv)
         h[0] = 0.5f / 1000; h[1] = 0.5f / 600;
         /* Г2: как у игры — [6,7] 1/размер кадра, [12] RadiusToScreen (одиночное число, пропорционально высоте) */
         h[6] = 1.0f / 1000; h[7] = 1.0f / 600; h[12] = 30000; h[13] = 324; h[14] = -1.0f / 324;   /* R² и −1/R² за радиусом */
+        /* ревизия 20.11, Ф1: за радиусом — мировые числа (у игры [40..42] — позиция камеры). Камера рядом с размером экрана
+         * не правится: экранные пары только до радиуса */
+        h[40] = 1000.5f; h[41] = 600.25f;
         D3D11_BUFFER_DESC dd = {sizeof h, D3D11_USAGE_DYNAMIC, D3D11_BIND_CONSTANT_BUFFER, D3D11_CPU_ACCESS_WRITE, 0, 0};
         ID3D11Buffer *dcb = NULL, *dst = NULL;
         ID3D11Device_CreateBuffer(dev, &dd, NULL, &dcb);
@@ -209,6 +212,22 @@ int main(int argc, char **argv)
         CHECK(o[0] == 0.5f / 1500 && o[1] == 0.5f / 900, "CB84 Map/Unmap: (%g %g)", o[0], o[1]);
         CHECK(o[12] > 44999 && o[12] < 45001 && o[13] == 324,
               "CB84 HBAO+ radius follows the real frame height: [12]=%g (want 45000), [13]=%g (want 324)", o[12], o[13]);
+        CHECK(o[40] == 1000.5f && o[41] == 600.25f, "CB84: world numbers after the radius left alone: [40]=%g [41]=%g", o[40],
+              o[41]);
+        ID3D11DeviceContext_Unmap(ctx, (ID3D11Resource *)dst, 0);
+        /* 20.11: угол обзора, при котором [7..9] устроены как «радиус, R², −1/R²» (A.x·A.y = −1). Номер найден раньше —
+         * правится радиус [12], а 1/высота [7] остаётся 1/900 (раньше удваивалась, радиус не правился) */
+        h[8] = 1.25f; h[9] = -0.8f;
+        if (SUCCEEDED(ID3D11DeviceContext_Map(ctx, (ID3D11Resource *)dcb, 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) {
+            memcpy(mp.pData, h, sizeof h);
+            ID3D11DeviceContext_Unmap(ctx, (ID3D11Resource *)dcb, 0);
+        }
+        ID3D11DeviceContext_CopyResource(ctx, (ID3D11Resource *)dst, (ID3D11Resource *)dcb);
+        ID3D11DeviceContext_Map(ctx, (ID3D11Resource *)dst, 0, D3D11_MAP_READ, 0, &mp);
+        o = (float *)mp.pData;
+        CHECK(o[12] > 44999 && o[12] < 45001 && o[7] == 1.0f / 900 && o[8] == 1.25f,
+              "CB84 at the FOV where [7..9] look like the radius: [12]=%g (want 45000), [7]=%g (want %g), [8]=%g", o[12],
+              o[7], 1.0 / 900, o[8]);
         ID3D11DeviceContext_Unmap(ctx, (ID3D11Resource *)dst, 0);
         /* CB другого размера (UI-проекция 232) не трогается */
         float u[232] = {0};

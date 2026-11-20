@@ -42,6 +42,21 @@ static void apply_vp(ID3D11DeviceContext *c)
     ORIGC(c, RSSetViewports, PFN_VP)(RC(c), s->nvp, s->nvp ? v : NULL);
 }
 
+void vp_shift(ID3D11DeviceContext *c, float dx, float dy)
+{
+    CtxState *s = ST(c);
+    D3D11_VIEWPORT v[MAX_VP];
+    for (UINT i = 0; i < s->nvp; i++) {
+        v[i] = s->vp[i];
+        if (s->rk.num) vp_to_phys(s->rk, &v[i]);
+        v[i].TopLeftX += dx;
+        v[i].TopLeftY += dy;
+    }
+    if (s->nvp) ORIGC(c, RSSetViewports, PFN_VP)(RC(c), s->nvp, v);
+}
+
+void vp_apply(ID3D11DeviceContext *c) { apply_vp(c); }
+
 static void apply_sc(ID3D11DeviceContext *c)
 {
     CtxState *s = ST(c);
@@ -69,6 +84,7 @@ static void reset(ID3D11DeviceContext *c)
     world_reset(c);
     dof_reset(c);
     ST(c)->cs = NULL; ST(c)->cs_lum = 0;
+    ST(c)->topo = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;   /* Э5: состояние по умолчанию */
 }
 
 static Ratio view_ratio(ID3D11View *v)
@@ -134,11 +150,25 @@ static ID3D11DepthStencilView *fit_dsv(UINT n, ID3D11RenderTargetView *const *rt
                     : dd.ViewDimension == D3D11_DSV_DIMENSION_TEXTURE2DARRAY ? dd.Texture2DArray.MipSlice : 0;
             Real ra = view_real((ID3D11View *)rtv[i], rm), rb = view_real((ID3D11View *)dsv, dm);
             if (ra.ok && rb.ok && (ra.w != rb.w || ra.h != rb.h || ra.samples != rb.samples)) {
-                static volatile LONG said;
-                if (InterlockedIncrement(&said) <= 8)
-                    LOG("targets: depth detached - real size or sample count differs from the render target "
-                        "(target %ux%u x%u, ratio %d/%d; depth %ux%u x%u, ratio %d/%d)", ra.w, ra.h, ra.samples, a.num, a.den,
-                        rb.w, rb.h, rb.samples, b.num, b.den);
+                /* по строке на каждую новую пару (размеры, коэффициенты) — 8 первых вызовов прятали всё, что игра
+                 * рисует позже (19.11: 3D-иконки инвентаря) */
+                static struct { UINT rw, rh, dw, dh; int an, bn; } seen[64];
+                static volatile LONG nseen;
+                int dup = 0;
+                LONG ns = nseen < 64 ? nseen : 64;
+                for (LONG s = 0; s < ns && !dup; s++)
+                    dup = seen[s].rw == ra.w && seen[s].rh == ra.h && seen[s].dw == rb.w && seen[s].dh == rb.h &&
+                          seen[s].an == a.num * 1000 + a.den && seen[s].bn == b.num * 1000 + b.den;
+                if (!dup) {
+                    LONG k = InterlockedIncrement(&nseen);
+                    if (k <= 64) {
+                        seen[k - 1].rw = ra.w; seen[k - 1].rh = ra.h; seen[k - 1].dw = rb.w; seen[k - 1].dh = rb.h;
+                        seen[k - 1].an = a.num * 1000 + a.den; seen[k - 1].bn = b.num * 1000 + b.den;
+                        LOG("targets: depth detached - real size or sample count differs from the render target "
+                            "(target %ux%u x%u, ratio %d/%d, format %d; depth %ux%u x%u, ratio %d/%d, format %d)", ra.w, ra.h,
+                            ra.samples, a.num, a.den, rd.Format, rb.w, rb.h, rb.samples, b.num, b.den, dd.Format);
+                    }
+                }
                 return NULL;
             }
             break;
@@ -226,6 +256,8 @@ static void STDMETHODCALLTYPE hk_ClearState(ID3D11DeviceContext *c)
 static void STDMETHODCALLTYPE hk_ExecuteCommandList(ID3D11DeviceContext *c, ID3D11CommandList *l, BOOL restore)
 {
     if (g_cap) diag_note(c, "ExecuteCommandList %06x", (unsigned)((ULONG_PTR)l & 0xffffff));
+    box_restore(c);     /* вердикт 19.11, п. 2: свои правки буфера сцены — вернуть до того, как копии забудутся */
+    dof_restore(c);
     ORIGC(c, ExecuteCommandList, PFN_ECL)(RC(c), l, restore);
     cb_ctx_forget(c);   /* список мог переписать буферы */
     if (!restore) reset(c);
@@ -233,6 +265,8 @@ static void STDMETHODCALLTYPE hk_ExecuteCommandList(ID3D11DeviceContext *c, ID3D
 
 static HRESULT STDMETHODCALLTYPE hk_FinishCommandList(ID3D11DeviceContext *c, BOOL restore, ID3D11CommandList **l)
 {
+    box_restore(c);     /* вердикт 19.11, п. 2: список не уходит с шагом или радиусом мода в буфере сцены */
+    dof_restore(c);
     HRESULT hr = ORIGC(c, FinishCommandList, PFN_FCL)(RC(c), restore, l);
     if (g_cap && l) diag_note(c, "FinishCommandList %06x", (unsigned)((ULONG_PTR)*l & 0xffffff));
     cb_ctx_forget(c);   /* новый список начинается без содержимого буферов */

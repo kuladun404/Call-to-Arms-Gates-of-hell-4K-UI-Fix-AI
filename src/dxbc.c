@@ -33,8 +33,8 @@ static int find_in_rdef(const unsigned char *c, size_t n, const char *name, Dxbc
             return 0;
         for (unsigned v = 0; v < nvar && v < 1024; v++) {
             size_t e = (size_t)varoff + vsz * v;
-            unsigned vname, start, size;
-            if (!rd(c, n, e, &vname) || !rd(c, n, e + 4, &start) || !rd(c, n, e + 8, &size)) return 0;
+            unsigned vname, start, size, vflags;
+            if (!rd(c, n, e, &vname) || !rd(c, n, e + 4, &start) || !rd(c, n, e + 8, &size) || !rd(c, n, e + 12, &vflags)) return 0;
             const char *s = str_at(c, n, vname);
             if (!s || strcmp(s, name)) continue;
             const char *bn = str_at(c, n, cbname);
@@ -48,6 +48,7 @@ static int find_in_rdef(const unsigned char *c, size_t n, const char *name, Dxbc
                     out->cb_bytes = cbsize;
                     out->offset = start;
                     out->size = size;
+                    out->used = (vflags & 2) != 0;   /* D3D_SVF_USED */
                     return 1;
                 }
             }
