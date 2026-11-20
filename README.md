@@ -5,12 +5,36 @@
 
 ### ⬇ [Скачать 2.0 / Download 2.0](../../releases/tag/v2.0)
 
-[Все версии / All releases](../../releases) · [Что изменилось / Changelog](CHANGELOG.md) · [Проверка на вирусы / Virus scan](#проверка-на-вирусы--virus-scan) · [Nexus Mods](https://www.nexusmods.com/calltoarmsgatesofhellostfront/mods/29) · [Steam guide](https://steamcommunity.com/sharedfiles/filedetails/?id=3839336153)
+[Как это выглядит / How it looks](#как-это-выглядит--how-it-looks) · [Все версии / All releases](../../releases) · [Что изменилось / Changelog](CHANGELOG.md) · [Проверка на вирусы / Virus scan](#проверка-на-вирусы--virus-scan) · [Nexus Mods](https://www.nexusmods.com/calltoarmsgatesofhellostfront/mods/29) · [Steam guide](https://steamcommunity.com/sharedfiles/filedetails/?id=3839336153)
 
 **[Русский](#русский) · [English](#english)**
 
 > Мод и инструменты созданы с помощью ИИ (Claude) — отсюда «(AI)» в названии.
 > The mod and its tools were built with AI assistance (Claude) — hence "(AI)" in the name.
+
+---
+
+## Как это выглядит / How it looks
+
+Слева — без мода: игра в Full HD 1920×1080, растянутая на монитор 4K. Справа — с модом: 4K 3840×2160, интерфейс ×2. Фрагменты в масштабе 1:1.
+Left: without the mod — the game at Full HD 1920×1080, stretched to a 4K monitor. Right: with the mod — 4K 3840×2160, interface ×2. Close-ups at 1:1.
+
+![Крупный план: шрифты меню, иконки предметов и текст в бою — без мода и с модом / Close-up: menu fonts, item icons and battle text — without and with the mod](docs/screens/closeup_icons_text.png)
+
+Полные снимки экрана 3840×2160 — нажмите на картинку, чтобы открыть её в полном размере.
+Full 3840×2160 screenshots — click a picture to open it at full size.
+
+**Меню без мода / Menu without the mod** — Full HD, растянуто на 4K / stretched to 4K
+![Меню без мода / Menu without the mod](docs/screens/menu_fullhd.jpg)
+
+**Меню с модом / Menu with the mod** — 4K, интерфейс ×2 / interface ×2
+![Меню с модом / Menu with the mod](docs/screens/menu_mod_4k.jpg)
+
+**Бой без мода / Battle without the mod** — Full HD, растянуто на 4K / stretched to 4K
+![Бой без мода / Battle without the mod](docs/screens/battle_fullhd.jpg)
+
+**Бой с модом / Battle with the mod** — 4K, интерфейс ×2 / interface ×2
+![Бой с модом / Battle with the mod](docs/screens/battle_mod_4k.jpg)
 
 ---
 
