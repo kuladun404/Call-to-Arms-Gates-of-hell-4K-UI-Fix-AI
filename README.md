@@ -5,7 +5,7 @@
 
 ### ⬇ [Скачать 2.0 / Download 2.0](../../releases/tag/v2.0)
 
-[Все версии / All releases](../../releases) · [Что изменилось / Changelog](CHANGELOG.md) · [Nexus Mods](https://www.nexusmods.com/calltoarmsgatesofhellostfront/mods/29) · [Steam guide](https://steamcommunity.com/sharedfiles/filedetails/?id=3839336153)
+[Все версии / All releases](../../releases) · [Что изменилось / Changelog](CHANGELOG.md) · [Проверка на вирусы / Virus scan](#проверка-на-вирусы--virus-scan) · [Nexus Mods](https://www.nexusmods.com/calltoarmsgatesofhellostfront/mods/29) · [Steam guide](https://steamcommunity.com/sharedfiles/filedetails/?id=3839336153)
 
 **[Русский](#русский) · [English](#english)**
 
@@ -169,6 +169,57 @@ python build.py --install   # install into the game (the game must be closed)
 ```
 The game folder is found through Steam; otherwise set `GOH_DIR=<game folder>`. For `--package`, copy `ui4k_fonts2.dat` and `ui4k_fonts4.dat` from the release archive into `out\fontpages\`.
 How it works: [docs/ARCHITECTURE_RU.md](docs/ARCHITECTURE_RU.md) (in Russian).
+
+---
+
+## Проверка на вирусы / Virus scan
+
+**Проверено 20.11.2026 на VirusTotal / Checked on 2026-11-20 on VirusTotal**
+
+| Файл / File | SHA-256 | VirusTotal |
+|---|---|---|
+| `GoH-UI4K-2.0-2026.11.20-491f4a9.zip` (release) | `d72f0b76732f46969073000570620e7e06fd72e7360817afae90183e438be92d` | [**0 / 55** — clean](https://www.virustotal.com/gui/file/d72f0b76732f46969073000570620e7e06fd72e7360817afae90183e438be92d) |
+| `d3d11.dll` (inside the zip) | `7c8124c76e00494c8960b21f88fa55387e9677a0fee90fd36895363a09c5be28` | [**2 / 71**](https://www.virustotal.com/gui/file/7c8124c76e00494c8960b21f88fa55387e9677a0fee90fd36895363a09c5be28) — see below / см. ниже |
+
+Единственный исполняемый файл мода — `d3d11.dll`; `ui4k.ini` и `README_*.txt` — текст, `ui4k_fonts*.dat` — данные изображений.
+The only executable file of the mod is `d3d11.dll`; `ui4k.ini` and `README_*.txt` are text, `ui4k_fonts*.dat` are image data.
+
+### Что произошло с DLL / What happened with the DLL
+**Русский.** Два антивируса из 71 отметили `d3d11.dll`, оба — без названия какого-либо вируса:
+- **Cynet** — «Malicious (score: 100)»: оценка машинного обучения;
+- **Skyhigh (SWG)** — «BehavesLike.Win64.Dropper.hh»: догадка по поведению («ведёт себя похоже на…»).
+
+Почему так: мод — это прокси `d3d11.dll`. Игра загружает его из своей папки, он передаёт все вызовы системной `d3d11.dll` и по пути перехватывает вызовы Direct3D и окна игры, чтобы увеличить интерфейс. Для автоматических эвристик такое поведение похоже на подозрительное. Мод при этом ничего не скачивает, не создаёт и не запускает других программ, не работает с сетью и не меняет файлы игры; его исходный код открыт в этом репозитории.
+
+Остальные **69 из 71** антивирусов — чисто, в том числе Microsoft Defender, Kaspersky, ESET-NOD32, BitDefender, Avast и Malwarebytes. Архив выпуска целиком — **0 из 55**.
+
+**Что мы делаем:** отправляем в Cynet и Skyhigh заявки о ложном срабатывании (адреса — из официального списка VirusTotal). После их пересмотра обновим этот раздел.
+
+**English.** Two of 71 engines flagged `d3d11.dll`, both without naming any malware:
+- **Cynet** — "Malicious (score: 100)": a machine-learning score;
+- **Skyhigh (SWG)** — "BehavesLike.Win64.Dropper.hh": a behaviour guess ("behaves like…").
+
+Why: the mod is a proxy `d3d11.dll`. The game loads it from its own folder; it forwards every call to the system `d3d11.dll` and hooks Direct3D and the game window on the way to enlarge the interface. Automatic heuristics see that as suspicious. The mod does not download, create or run any other program, has no network code and does not change the game's files; its source code is open in this repository.
+
+The other **69 of 71** engines report it clean, including Microsoft Defender, Kaspersky, ESET-NOD32, BitDefender, Avast and Malwarebytes. The whole release archive: **0 of 55**.
+
+**What we do:** we are sending false-positive reports to Cynet and Skyhigh (addresses from VirusTotal's official list). This section will be updated after their review.
+
+### Подтверждения / Proof
+Снимки отчётов VirusTotal на 20.11.2026 / VirusTotal reports as of 2026-11-20:
+
+| Архив выпуска / Release archive — 0 / 55 | `d3d11.dll` — 2 / 71 |
+|---|---|
+| <img src="docs/virustotal/vt_2.0_zip.jpg" width="360" alt="VirusTotal: release zip 0/55"> | <img src="docs/virustotal/vt_2.0_dll.jpg" width="360" alt="VirusTotal: d3d11.dll 2/71"> |
+
+Актуальные отчёты — по ссылкам в таблице выше. / Current reports: links in the table above.
+
+### Проверить свой файл / Check your download
+PowerShell:
+```
+Get-FileHash .\GoH-UI4K-2.0-2026.11.20-491f4a9.zip -Algorithm SHA256
+```
+Хэш должен совпасть с таблицей выше и с `SHA256SUMS.txt` в выпуске. / The hash must match the table above and `SHA256SUMS.txt` in the release.
 
 ---
 
