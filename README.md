@@ -23,7 +23,7 @@
 | **Масштаб на выбор** | ×1, ×1.25, ×1.5, ×1.75, ×2 и «интерфейс как на Full HD». |
 | **Мир отдельно от интерфейса** | 3D — в родном разрешении монитора или меньше (1440, 1080): больше кадров, а интерфейс остаётся чётким. |
 | **Чёткий текст** | Буквы интерфейса рисуются в высоком разрешении, а не растягиваются. |
-| **Чёткие иконки** | Иконки предметов в инвентаре — как у самой игры в 4K. |
+| **Чёткие иконки предметов** | Только иконки предметов в инвентаре (оружие, боеприпасы, снаряжение) — их игра рисует из 3D-моделей. Остальные картинки интерфейса (карточки отрядов, кнопки, значки) увеличены как есть. |
 | **Всё в самой игре** | Выбор — в списке разрешений игры, сменить можно на ходу. |
 | **Эффекты игры** | MSAA, HDR, глубина резкости, затенение HBAO+ работают вместе с модом. |
 | **Без вмешательства в игру** | Файлы игры и exe не меняются, в архиве нет программ. |
@@ -44,7 +44,7 @@
 - «интерфейс как на Full HD» — интерфейс того же размера, что на мониторе 1920×1080;
 - «другой монитор» — переносит игру на второй монитор.
 
-Выберите строку и нажмите «Применить». Окна, 3D-виды и иконки перерисуются в новом масштабе сами.
+Выберите строку и нажмите «Применить». Окна, 3D-виды и иконки предметов перерисуются в новом масштабе сами.
 
 ### Настройки
 Файл `ui4k.ini` в `binaries\x64`, описание каждой настройки — внутри. Обычно менять ничего не нужно.
@@ -63,9 +63,9 @@
 
 ### История версий
 **2.0 — 20.11.2026**
-- Чёткий текст интерфейса и чёткие иконки предметов.
+- Чёткий текст интерфейса и чёткие иконки предметов в инвентаре.
 - Линии интерфейса (рамка на миникарте) толщиной в логический пиксель.
-- Смена масштаба на ходу: окна, 3D-виды и иконки перерисовываются без перезапуска.
+- Смена масштаба на ходу: окна, 3D-виды и иконки предметов перерисовываются без перезапуска.
 - Запуск сразу в масштабе из настроек игры.
 - Исправлено: мигание мира при беге в прямом управлении, свет и туман над отдельными местами карты, мигание затенения HBAO+, отражение в воде, падение FPS в меню паузы, помехи от счётчика RivaTuner и других оверлеев, лишние строки на мониторах 1080p и 1440p, снимок экрана Steam (F12).
 
@@ -102,7 +102,7 @@ python build.py --install   # поставить в игру (игра долж�
 | **Scale of your choice** | ×1, ×1.25, ×1.5, ×1.75, ×2 and "UI like Full HD". |
 | **World apart from the interface** | 3D at the monitor's native resolution or lower (1440, 1080): more frames, the interface stays sharp. |
 | **Sharp text** | Interface letters are drawn at high resolution instead of being stretched. |
-| **Sharp icons** | Inventory item icons as the game itself draws them in 4K. |
+| **Sharp item icons** | Only the item icons in the inventory (weapons, ammo, equipment) — the game draws them from 3D models. Other interface images (unit cards, buttons, markers) are enlarged as they are. |
 | **All in the game** | Picked in the game's resolution list, can be changed on the fly. |
 | **Game effects** | MSAA, HDR, depth of field and HBAO+ shading work together with the mod. |
 | **Hands off the game** | Game files and the exe are not changed, the archive has no programs. |
@@ -123,7 +123,7 @@ Options → Video → Resolution. The list has the mod's entries:
 - "UI like Full HD" — an interface of the same size as on a 1920×1080 monitor;
 - "other monitor" — moves the game to the second monitor.
 
-Pick an entry and press Apply. Windows, 3D views and icons are redrawn at the new scale by themselves.
+Pick an entry and press Apply. Windows, 3D views and item icons are redrawn at the new scale by themselves.
 
 ### Settings
 The file `ui4k.ini` in `binaries\x64` describes every setting. Usually nothing needs changing.
@@ -142,9 +142,9 @@ The mod does not touch the exe or the files the game checks online — only how 
 
 ### Version history
 **2.0 — 2026-11-20**
-- Sharp interface text and sharp item icons.
+- Sharp interface text and sharp item icons in the inventory.
 - Interface lines (the minimap frame) one logical pixel thick.
-- Scale changes on the fly: windows, 3D views and icons are redrawn without a restart.
+- Scale changes on the fly: windows, 3D views and item icons are redrawn without a restart.
 - Starts right away at the scale from the game settings.
 - Fixed: the world flashing during a sprint in direct control, lighting and fog over some spots of the map, HBAO+ flashing, water reflection, FPS drop in the pause menu, interference from the RivaTuner counter and other overlays, extra entries on 1080p and 1440p monitors, the Steam screenshot (F12).
 

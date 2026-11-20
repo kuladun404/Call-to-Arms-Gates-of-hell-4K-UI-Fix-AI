@@ -8,11 +8,11 @@
 
 ### 2.0 — 20.11.2026
 
-Выпуск 2.0. Всё, что было в бете, плюс чёткие буквы, чёткие иконки и исправления по разбору игры.
+Выпуск 2.0. Всё, что было в бете, плюс чёткие буквы, чёткие иконки предметов и исправления по разбору игры.
 
 **Новое**
 - **Чёткий текст.** Буквы интерфейса рисуются в высоком разрешении, а не растягиваются (файлы `ui4k_fonts2.dat` и `ui4k_fonts4.dat`). Буквы других языков и значки — как в игре.
-- **Чёткие иконки предметов** в инвентаре — как у самой игры в 4K.
+- **Чёткие иконки предметов** в инвентаре (оружие, боеприпасы, снаряжение — их игра рисует из 3D-моделей). Остальные картинки интерфейса (карточки отрядов, кнопки, значки) увеличены как есть.
 - **Линии интерфейса** (рамка обзора на миникарте) — толщиной в логический пиксель, а не в один пиксель экрана.
 - **Смена масштаба на ходу**: после «Применить» окна, 3D-виды и иконки предметов перерисовываются в новом масштабе, без перезапуска игры.
 - **Запуск сразу в масштабе профиля**: виды 3D и первые буквы больше не остаются в масштабе первой строки списка.
@@ -76,11 +76,11 @@
 
 ### 2.0 — 2026-11-20
 
-The 2.0 release. Everything from the beta plus sharp letters, sharp icons and fixes found by taking the game apart.
+The 2.0 release. Everything from the beta plus sharp letters, sharp item icons and fixes found by taking the game apart.
 
 **New**
 - **Sharp text.** Interface letters are drawn at high resolution instead of being stretched (files `ui4k_fonts2.dat` and `ui4k_fonts4.dat`). Letters of other languages and icons are as in the game.
-- **Sharp item icons** in the inventory — as the game itself draws them in 4K.
+- **Sharp item icons** in the inventory (weapons, ammo, equipment — the game draws them from 3D models). Other interface images (unit cards, buttons, markers) are enlarged as they are.
 - **Interface lines** (the view frame on the minimap) are one logical pixel thick, not one screen pixel.
 - **Changing the scale on the fly**: after Apply, windows, 3D views and item icons are redrawn at the new scale, no restart needed.
 - **Starts at the profile's scale**: 3D views and the first letters no longer stay at the scale of the first list entry.
