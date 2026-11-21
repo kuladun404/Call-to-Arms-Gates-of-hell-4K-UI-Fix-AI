@@ -5,6 +5,8 @@
 
 ### ⬇ [Скачать 2.0 / Download 2.0](../../releases/tag/v2.0)
 
+Пробная версия / Alpha: [2.1-alpha](../../releases/tag/v2.1-alpha) — DXVK на Windows, Linux / Steam Deck (Proton) / DXVK on Windows, Linux / Steam Deck (Proton)
+
 [Как это выглядит / How it looks](#как-это-выглядит--how-it-looks) · [Все версии / All releases](../../releases) · [Что изменилось / Changelog](CHANGELOG.md) · [Проверка на вирусы / Virus scan](#проверка-на-вирусы--virus-scan) · [Nexus Mods](https://www.nexusmods.com/calltoarmsgatesofhellostfront/mods/29) · [Steam guide](https://steamcommunity.com/sharedfiles/filedetails/?id=3839336153)
 
 **[Русский](#русский) · [English](#english)**
@@ -88,7 +90,16 @@ Full 3840×2160 screenshots — click a picture to open it at full size.
 ### Сетевая игра
 Мод не трогает exe и файлы, которые игра сверяет по сети, — только то, как картинка выводится на экран. Официально это не проверялось, на ваше усмотрение.
 
+### DXVK и Linux / Steam Deck (пробно, 2.1-alpha)
+- **DXVK на Windows** переводит графику игры с Direct3D на Vulkan; иногда даёт больше FPS, особенно на AMD и Intel. Скачайте из [выпуска 2.1-alpha](../../releases/tag/v2.1-alpha) мод и дополнение `…-DXVK-addon.zip` (официальный DXVK 3.1.1, файлы проверены на VirusTotal) и перетащите папку `binaries` из обоих архивов в папку игры. Мод сам увидит `d3d11_dxvk.dll` и включит DXVK. Убрать DXVK — удалить **оба** файла, `d3d11_dxvk.dll` и `dxgi.dll`.
+- **Linux / Steam Deck (Proton):** DXVK там уже встроен, дополнение не нужно. Установите мод и пропишите в Steam → Свойства игры → Параметры запуска: `WINEDLLOVERRIDES="d3d11=n,b" %command%`. Ещё не проверено — пришлите `ui4k.log`, работает или нет.
+
 ### История версий
+**2.1-alpha — 21.11.2026 (пробная)**
+- DXVK на Windows: мод передаёт работу DXVK (`d3d11_dxvk.dll` рядом с модом или настройка `next_d3d11=`). Проверено в меню и в бою на NVIDIA.
+- Пробная поддержка Linux / Steam Deck (Proton): мод пишет в журнал, что работает под Wine.
+- Предупреждение «на свой страх и риск» в инструкциях архива.
+
 **2.0 — 20.11.2026**
 - Чёткий текст интерфейса и чёткие иконки предметов в инвентаре.
 - Линии интерфейса (рамка на миникарте) толщиной в логический пиксель.
@@ -167,7 +178,16 @@ Send `ui4k.log` from `binaries\x64` and say what you did, your graphics card and
 ### Multiplayer
 The mod does not touch the exe or the files the game checks online — only how the picture is put on the screen. This has not been officially verified, use at your discretion.
 
+### DXVK and Linux / Steam Deck (experimental, 2.1-alpha)
+- **DXVK on Windows** translates the game's graphics from Direct3D to Vulkan; it sometimes gives more FPS, especially on AMD and Intel. Download the mod and the add-on `…-DXVK-addon.zip` (official DXVK 3.1.1, files checked on VirusTotal) from the [2.1-alpha release](../../releases/tag/v2.1-alpha) and drag the `binaries` folder of both archives into the game folder. The mod finds `d3d11_dxvk.dll` and turns DXVK on by itself. To remove DXVK delete **both** files, `d3d11_dxvk.dll` and `dxgi.dll`.
+- **Linux / Steam Deck (Proton):** DXVK is already built in, the add-on is not needed. Install the mod and set Steam → game Properties → Launch options: `WINEDLLOVERRIDES="d3d11=n,b" %command%`. Not tested yet — please send your `ui4k.log`, whether it works or not.
+
 ### Version history
+**2.1-alpha — 2026-11-21 (experimental)**
+- DXVK on Windows: the mod hands the work to DXVK (`d3d11_dxvk.dll` next to the mod or the `next_d3d11=` setting). Tested in the menu and in battle on NVIDIA.
+- Experimental Linux / Steam Deck (Proton) support: the mod notes in its log that it runs under Wine.
+- "Use at your own risk" note in the archive's instructions.
+
 **2.0 — 2026-11-20**
 - Sharp interface text and sharp item icons in the inventory.
 - Interface lines (the minimap frame) one logical pixel thick.

@@ -68,6 +68,19 @@ static HRESULT STDMETHODCALLTYPE ovCreateSwapChain(IDXGIFactory *f, IUnknown *de
     return hr;
 }
 
+/* ---- «драйвер», подменяющий оконную процедуру ---- */
+static WNDPROC g_drv_orig;
+static int n_drv, g_drv_depth, g_drv_loop;
+static LRESULT CALLBACK drv_proc(HWND h, UINT m, WPARAM w, LPARAM l)
+{
+    if (m == WM_USER + 7) n_drv++;
+    if (g_drv_depth > 20) { g_drv_loop = 1; return 0; }   /* круг: дальше не звать, иначе стек кончится */
+    g_drv_depth++;
+    LRESULT r = CallWindowProcW(g_drv_orig, h, m, w, l);
+    g_drv_depth--;
+    return r;
+}
+
 int main(int argc, char **argv)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -149,6 +162,29 @@ int main(int argc, char **argv)
     CHECK(n_fs >= 2 && n_pr >= 2 && n_gb >= 2 && n_rb >= 2, "the other hooker is still called: fs %d present %d getbuffer %d resize %d",
           n_fs, n_pr, n_gb, n_rb);
     CHECK(n_fs < 100 && n_pr < 100, "no runaway recursion (fs %d present %d)", n_fs, n_pr);
+
+    /* 21.11, DXVK: драйвер Vulkan (opengl32.dll NVIDIA) при создании swapchain ставит свою оконную процедуру поверх
+     * обёртки мода, запомнив обёртку своим «оригиналом». Игра при смене MSAA создаёт swapchain на том же окне — мод
+     * оборачивал окно заново и брал процедуру драйвера своим оригиналом: круг, исчерпание стека. «Драйвер» здесь —
+     * SetWindowLongPtrW напрямую из user32 (мимо перехвата импорта, как чужой модуль). */
+    printf("window procedure: other subclasser on top of the mod, then a new swap chain on the same window\n");
+    HWND w3 = CreateWindowExW(0, L"STATIC", L"sc3", WS_OVERLAPPEDWINDOW, 0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    d.OutputWindow = w3;
+    IDXGISwapChain *s3 = NULL, *s4 = NULL;
+    hr = IDXGIFactory_CreateSwapChain(f, (IUnknown *)dev, &d, &s3);
+    CHECK(SUCCEEDED(hr) && s3, "swap chain on w3 hr=0x%08lx", hr);
+    typedef LONG_PTR(WINAPI *PFN_SWLP)(HWND, int, LONG_PTR);
+    PFN_SWLP real_swlp = (PFN_SWLP)(void *)GetProcAddress(GetModuleHandleA("user32.dll"), "SetWindowLongPtrW");
+    g_drv_orig = (WNDPROC)real_swlp(w3, GWLP_WNDPROC, (LONG_PTR)drv_proc);
+    if (s3) IDXGISwapChain_Release(s3);
+    hr = IDXGIFactory_CreateSwapChain(f, (IUnknown *)dev, &d, &s4);   /* игра: новый swapchain на том же окне */
+    CHECK(SUCCEEDED(hr) && s4, "second swap chain on w3 hr=0x%08lx", hr);
+    n_drv = 0;
+    SendMessageW(w3, WM_USER + 7, 0, 0);
+    CHECK(n_drv == 1 && !g_drv_loop, "the other subclasser runs once per message, no loop (calls %d%s)", n_drv,
+          g_drv_loop ? ", loop detected" : "");
+    if (s4) IDXGISwapChain_Release(s4);
+    DestroyWindow(w3);
 
     IDXGISwapChain_Release(sc[0]); IDXGISwapChain_Release(sc[1]);
     IDXGIFactory_Release(f);

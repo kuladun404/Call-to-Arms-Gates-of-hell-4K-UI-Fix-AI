@@ -2,6 +2,9 @@ Call to Arms Gates of hell - 4K UI Fix (AI) — a large interface for Call to Ar
 Version: {version}
 https://github.com/kuladun404/Call-to-Arms-Gates-of-hell-4K-UI-Fix-AI
 
+USE AT YOUR OWN RISK. This is an unofficial fan mod, not made or supported by the game's
+developers. If something goes wrong, just delete the mod's files (see "Removing").
+
 
 WHAT IT DOES
 
@@ -12,7 +15,7 @@ letters are drawn at high resolution instead of being stretched. It does not cha
 
 REQUIREMENTS
 
-- Windows 10 or 11, 64-bit.
+- Windows 10 or 11, 64-bit. Linux / Steam Deck (Proton) — experimental, see "Linux and Steam Deck".
 - Tested on NVIDIA graphics cards. It should work on AMD and Intel, but it has not been tested there yet.
   If something goes wrong, see "If something goes wrong".
 
@@ -73,11 +76,50 @@ REMOVING
 1. Close the game.
 2. Delete d3d11.dll, ui4k.ini, ui4k_fonts2.dat, ui4k_fonts4.dat, ui4k_labels.pak and ui4k.log
    (and ui4k.2.log and the like, if any) from binaries\x64.
+   If you installed the DXVK add-on, you MUST also delete d3d11_dxvk.dll and dxgi.dll
+   (otherwise the game won't start), plus the logs call_to_arms_d3d11.log and call_to_arms_dxgi.log.
 3. If the folder %LOCALAPPDATA%\ui4k exists, delete it too: the mod keeps the entry labels there
    when it cannot write into the game folder.
 
 There is no need to set the resolution back first: without the mod the game switches to its
 desktop resolution setting by itself.
+
+
+DXVK (EXPERIMENTAL)
+
+DXVK translates the game's graphics from Direct3D to Vulkan. On Windows it sometimes gives more FPS,
+especially on AMD and Intel graphics cards. The mod does not need it.
+1. Download the add-on GoH-UI4K-...-DXVK-addon.zip from the same release page
+   (official DXVK 3.1.1, files checked on VirusTotal).
+   WARNING: if binaries\x64 already has its own dxgi.dll (ReShade, Special K etc.), the add-on
+   replaces it. Save your dxgi.dll somewhere else first, or don't install the add-on.
+2. Close the game and drag the binaries folder from it into the game folder, as when installing the mod.
+   d3d11_dxvk.dll and dxgi.dll end up next to the mod - the mod finds DXVK and uses it by itself.
+3. To remove DXVK delete BOTH files, d3d11_dxvk.dll and dxgi.dll (dxgi.dll alone breaks the start).
+The line "next_d3d11 ... is used instead of the system d3d11.dll" in ui4k.log means DXVK is working.
+DXVK writes its own logs call_to_arms_d3d11.log and call_to_arms_dxgi.log next to the game - that's normal.
+
+
+SWITCHING (with the game closed)
+
+- From 2.0 to 2.1-alpha: drag the binaries folder from the 2.1-alpha archive in, replacing the files.
+- Turn DXVK on (2.1-alpha and newer only): drag the binaries folder from the DXVK add-on in.
+- Turn DXVK off: delete BOTH files - d3d11_dxvk.dll and dxgi.dll.
+- From 2.1-alpha back to 2.0: FIRST delete both DXVK files (if you installed them),
+  then drag the binaries folder from the 2.0 archive in, replacing the files.
+- ui4k.ini fits both versions: you can keep your own settings.
+The main thing: DXVK's dxgi.dll must not stay without d3d11_dxvk.dll and the 2.1-alpha mod - the game won't start.
+If the 2.1-alpha mod is there but the pair is broken (e.g. only d3d11_dxvk.dll was deleted), the mod writes
+into ui4k.log which file to delete.
+
+
+LINUX AND STEAM DECK (EXPERIMENTAL)
+
+Proton already has DXVK built in, don't install the DXVK add-on (under Linux the mod ignores it anyway).
+Install the mod as usual and set in Steam: the game → Properties → Launch options:
+    WINEDLLOVERRIDES="d3d11=n,b" %command%
+The mod is for a 2K / 4K monitor or TV; on the Steam Deck's own screen (1280×800) it is not needed.
+This has not been tested yet. Please send your ui4k.log - whether it works or not, with what you see.
 
 
 MULTIPLAYER

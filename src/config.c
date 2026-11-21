@@ -25,7 +25,9 @@ static int ini_int(const WCHAR *ini, const WCHAR *key, int def)
 /* Профиль игры: самый свежий Documents\my games\gates of hell\profiles\*\options.set. Только чтение.
  *  hdr          — мир без HDR игра рисует прямо в экран: экранные картинки надо делать в размере мира с самого начала;
  *  antialiasing — MSAA: с ним мод в игре ещё не проверен, включаем безопасный режим (В0). */
-WCHAR g_appdata[MAX_PATH];         /* папка пользователя для пакета подписей; пусто — %LOCALAPPDATA%\ui4k (тесты: test_appdata=) */
+WCHAR g_next_d3d11[MAX_PATH];      /* next_d3d11=: полный путь d3d11.dll, которую грузить вместо системной; пусто — системная */
+int g_next_auto;                   /* 1 — g_next_d3d11 не из настройки, а найден рядом (d3d11_dxvk.dll из дополнения) */
+WCHAR g_appdata[MAX_PATH];       /* папка пользователя для пакета подписей; пусто — %LOCALAPPDATA%\ui4k (тесты: test_appdata=) */
 static WCHAR g_profiles[MAX_PATH];   /* папка профилей; пусто — Documents\my games\gates of hell\profiles (тесты: test_profiles=) */
 static int g_ini_hdr = -2, g_ini_aa = -2;   /* заданы в ui4k.ini — профиль для них не смотрим */
 static unsigned g_pmw, g_pmh;               /* {mode "WxH"} профиля — строка, выбранная в игре */
@@ -132,6 +134,20 @@ void config_load(HMODULE self)
     if (g_cfg.perf) LOG("perf: measurement mode on - a \"perf\" line every %s", g_cfg.perf_every > 0 ? "few frames (perf_every)" : "5 s");
     g_cfg.lum_fix = ini_int(ini, L"lum_fix", 1);
     g_cfg.labels = ini_int(ini, L"labels", 1);
+    WCHAR nx[MAX_PATH];   /* DXVK и т. п.: следующая d3d11.dll в цепочке вместо системной (путь от папки DLL или полный) */
+    GetPrivateProfileStringW(L"ui4k", L"next_d3d11", L"", nx, MAX_PATH, ini);
+    g_next_d3d11[0] = 0;
+    if (!lstrcmpiW(nx, L"system")) {
+        /* next_d3d11=system — всегда системная, даже если рядом лежит d3d11_dxvk.dll */
+    } else if (nx[0] && (nx[1] == L':' || (nx[0] == L'\\' && nx[1] == L'\\'))) {
+        lstrcpyW(g_next_d3d11, nx);
+    } else if (nx[0]) {
+        dir_file(g_next_d3d11, nx);
+    } else if (dir_file(g_next_d3d11, L"d3d11_dxvk.dll") && GetFileAttributesW(g_next_d3d11) == INVALID_FILE_ATTRIBUTES) {
+        g_next_d3d11[0] = 0;   /* не задано и рядом нет DXVK из дополнения: системная */
+    } else {
+        g_next_auto = 1;       /* d3d11_dxvk.dll рядом, в настройке пусто: взят сам (под Wine — нет, см. proxy.c) */
+    }
     GetPrivateProfileStringW(L"ui4k", L"test_profiles", L"", g_profiles, MAX_PATH, ini);
     GetPrivateProfileStringW(L"ui4k", L"test_appdata", L"", g_appdata, MAX_PATH, ini);
     GetPrivateProfileStringW(L"ui4k", L"test_shader_pak", L"", g_shaderpak, MAX_PATH, ini);

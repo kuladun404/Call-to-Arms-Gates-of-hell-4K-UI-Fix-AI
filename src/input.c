@@ -84,11 +84,27 @@ static LRESULT WINAPI hk_DefWindowProcW(HWND h, UINT m, WPARAM w, LPARAM l)
     return DefWindowProcW(h, m, w, l);
 }
 
+/* Окно, которое мод уже обернул (своим свойством или через класс), не оборачивается заново, даже если поверх обёртки
+ * теперь чужая процедура. 21.11, DXVK: драйвер Vulkan (opengl32.dll NVIDIA) при создании swapchain ставит свою процедуру
+ * поверх обёртки, запомнив обёртку своим оригиналом; игра при смене MSAA создаёт swapchain на том же окне, и мод
+ * оборачивал окно второй раз, взяв процедуру драйвера своим оригиналом — круг «мод -> драйвер -> мод», исчерпание стека
+ * (вылет в игре). Обёртка и так в цепочке под чужой процедурой — сообщения доходят до неё (то же правило, что у vt_patch). */
+static int wrapped(HWND h)
+{
+    return GetPropW(h, PROP) != NULL || (WNDPROC)GetClassLongPtrW(h, GCLP_WNDPROC) == wrap_proc;
+}
+
 void input_watch_window(HWND h)
 {
     if (!h || !g_cfg.enabled || (ratio_is_one(K) && !presets_on())) return;
     WNDPROC cur = (WNDPROC)GetWindowLongPtrW(h, GWLP_WNDPROC);
     if (cur == wrap_proc) return;
+    if (wrapped(h)) {
+        static volatile LONG said;
+        if (InterlockedIncrement(&said) <= 4)
+            LOG("window %p: another window procedure %p is on top of the mod's wrapper - left as is (no second wrap)", h, cur);
+        return;
+    }
     SetPropW(h, PROP, (HANDLE)cur);
     SetWindowLongPtrW(h, GWLP_WNDPROC, (LONG_PTR)wrap_proc);
     LOG("window %p subclassed (orig %p)", h, cur);

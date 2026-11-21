@@ -60,6 +60,8 @@ extern Config g_cfg;
 extern WCHAR g_dir[MAX_PATH];                 /* папка DLL с завершающим '\' */
 int dir_file(WCHAR *out, const WCHAR *name);  /* out[MAX_PATH] = g_dir + name; не помещается — "" и 0 */
 extern WCHAR g_appdata[MAX_PATH];             /* loc.c: запасная папка пакета подписей (тесты: test_appdata=) */
+extern WCHAR g_next_d3d11[MAX_PATH];          /* proxy.c: next_d3d11= (DXVK и т. п.) — полный путь; пусто — системная */
+extern int g_next_auto;                       /* 1 — найден рядом сам (d3d11_dxvk.dll), а не задан в ui4k.ini */
 void config_load(HMODULE self);               /* читает ui4k.ini, открывает лог */
 
 void dpi_init(void);                          /* dpi.c (В1): до создания окон */
@@ -343,6 +345,7 @@ void diag_hook_device(ID3D11Device *dev);           /* разбор байтко
 void diag_present(void);                            /* из Present: Ctrl+F11, начало и конец снимка */
 void diag_on_create(UINT w, UINT h);                /* diag_on=WxH: создан кэш этого размера — снимок с этого места */
 void diag_stack(const char *tag);                   /* стек вызовов (rva exe) в лог — разведка */
+void crash_install(void);                           /* crash.c: фатальное исключение — в лог, с модулем и стеком */
 /* ---- perf.c: режим замеров (perf=1, план v3 Э1) ---- */
 extern volatile LONG g_perf_cen;                    /* перепись в этом кадре (раз в 64 кадра) */
 void perf_present_pre(IDXGISwapChain *sc);          /* перед настоящим Present */

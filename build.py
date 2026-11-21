@@ -36,10 +36,10 @@ CTX_THUNKS = 192  # >= слотов ID3D11DeviceContext4Vtbl (static_assert в c
 SOURCES = ["proxy.c", "config.c", "log.c", "scale.c", "vt.c", "ctx.c", "device.c", "screen.c", "classify.c",
            "resources.c", "swapchain.c", "iat.c", "overlay.c", "viewport.c",
            "cbfix.c", "cb.c", "fmt.c", "upload.c", "profile.c", "dpi.c", "input.c", "copy.c", "cursor.c", "modes.c", "diag.c", "draw.c", "lum.c", "loc.c", "world.c",
-           "dxbc.c", "pstag.c", "dof.c", "box.c", "rtti.c", "views.c", "gamedata.c", "anchors.c", "d3dbg.c", "perf.c", "origin.c", "fontpages.c", "fontpages_core.c"]
+           "dxbc.c", "pstag.c", "dof.c", "box.c", "rtti.c", "views.c", "gamedata.c", "anchors.c", "d3dbg.c", "perf.c", "origin.c", "fontpages.c", "fontpages_core.c", "crash.c"]
 HLSL = {"lum_tile": "lum_tile.hlsl", "lum_hist": "lum_hist.hlsl"}  # compute-шейдеры -> байткод в gen/lum_cs.h
 CC = [sys.executable, "-m", "ziglang", "cc", "-target", "x86_64-windows-gnu"]
-VERSION = "2.0"
+VERSION = "2.1-alpha"
 INSTALLED = ["d3d11.dll", "ui4k.ini", "ui4k_fonts2.dat", "ui4k_fonts4.dat"]   # что кладём в binaries\x64
 FONT_DATA = OUT / "fontpages"                # образцы букв Э6 (файлы ui4k_fonts*.dat из архива выпуска)
 LEFTOVERS = ["ui4k.log", "ui4k.2.log", "ui4k.3.log", "ui4k.4.log", "ui4k_cs.txt", "ui4k_vs.txt", "ui4k_labels.pak"]  # что создаёт мод при работе
@@ -574,6 +574,30 @@ def run_tests(dll, debug=False):
         ok = bool(m) and (int(m[1]) == 0 or abs(int(m[2]) / int(m[3]) - 1.5 * 1280 / int(m[1])) < 1e-9)
         print(f"{'PASS' if ok else 'FAIL'}  render=1280x720 -> scene ratio = 1.5 * 1280 / monitor ({m[0] if m else 'no line'})")
         fails += not ok
+    # next_d3d11=: следующая d3d11.dll в цепочке (DXVK на Windows) — полный путь, сама себя, нет файла
+    sys_d3d = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "d3d11.dll"
+    # (значение next_d3d11, положить рядом d3d11_dxvk.dll — копию системной, что должно быть в логе, чего не должно)
+    for val, dxvk, want, nope in ((str(sys_d3d), False, "is used instead of the system d3d11.dll", None),
+                                  ("d3d11.dll", False, "is the mod itself - ignored", None),
+                                  ("no_such_d3d11.dll", False, "cannot load", None),
+                                  ("", True, "d3d11_dxvk.dll is used instead", None),        # дополнение DXVK: само
+                                  ("system", True, "loaded into", "is used instead"),        # system — даже при нём
+                                  ("", False, "loaded into", "next_d3d11"),                  # без него — как было
+                                  ("system", "dxgi", "is DXVK's dxgi.dll", None),            # dxgi.dll DXVK без пары
+                                  ("", "reshade", "loaded into", "WARNING")):                 # чужой dxgi.dll — молча
+        with tempfile.TemporaryDirectory(prefix="ui4k_v2_") as t:
+            shutil.copy2(dll, Path(t) / "d3d11.dll")
+            if dxvk is True:
+                shutil.copy2(sys_d3d, Path(t) / "d3d11_dxvk.dll")
+            elif dxvk:   # только сличение содержимого, сам файл не грузится: заглушка с меткой DXVK или без
+                (Path(t) / "dxgi.dll").write_bytes(b"MZ" + b"\0" * 70000 + (b"DXVK_LOG_LEVEL" if dxvk == "dxgi" else b"ReShade"))
+            (Path(t) / "ui4k.ini").write_text(f"[ui4k]\ngame_hdr=0\ngame_aa=0\nenabled=1\nscale=2\nlog=1\nfit_native=0\nnext_d3d11={val}\n")
+            name = f"next_d3d11={Path(val).name or '(empty)'}{' + d3d11_dxvk.dll' if dxvk is True else f' + {dxvk} dxgi.dll' if dxvk else ''}"
+            run(f"{name}: device works", ctx_exe, t)
+            log = (Path(t) / "ui4k.log").read_text(errors="replace")
+            ok = want in log and "FATAL" not in log and not (nope and nope in log)
+            print(f"{'PASS' if ok else 'FAIL'}  {name} -> log says \"{want}\"{f', not \"{nope}\"' if nope else ''}")
+            fails += not ok
 
     fails += test_install()
     with tempfile.TemporaryDirectory(prefix="ui4k_v2_pkg_") as t:   # архив для игроков: только файлы, без программ
@@ -795,6 +819,43 @@ def package(dll, out_dir=None):
     return zp
 
 
+# Дополнение DXVK: официальные 64-битные файлы DXVK без изменений, лежат вне репозитория (чужие программы в git не кладём).
+# Принимаются только файлы ровно с этими SHA-256 — те, что проверены на VirusTotal (d3d11 0/70, dxgi 0/71, 21.11.2026).
+DXVK_DIR = ROOT.parent / "release" / "dxvk-3.1.1"
+DXVK_FILES = {"d3d11.dll": ("binaries/x64/d3d11_dxvk.dll", "0a203b6255c893430f0a8461c618962df04e62aa41538d5a875b21868317cf9f"),
+              "dxgi.dll": ("binaries/x64/dxgi.dll", "e3c1178eb7f0dd59f91bcfcc257549e5b9cfdb5e8508719293de7f8704f53160")}
+
+
+def package_dxvk(out_dir=None):
+    """архив дополнения DXVK: два файла DXVK (d3d11 переименован в d3d11_dxvk.dll — мод находит его сам),
+    лицензия DXVK и инструкция. Без программ."""
+    import hashlib
+    import zipfile
+    ver = version()
+    out_dir = Path(out_dir or OUT / "package")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    zp = out_dir / f"GoH-UI4K-{ver}-DXVK-addon.zip"
+    for src, (_, sha) in DXVK_FILES.items():
+        p = DXVK_DIR / "x64" / src
+        if not p.exists() or hashlib.sha256(p.read_bytes()).hexdigest() != sha:
+            sys.exit(f"{p}: нет файла или не тот (SHA-256 не совпадает с проверенным на VirusTotal)")
+    lic = DXVK_DIR / "LICENSE.txt"
+    if not lic.exists():
+        sys.exit(f"нет {lic} (лицензия DXVK)")
+    with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED) as z:
+        for src, (dst, _) in DXVK_FILES.items():
+            z.write(DXVK_DIR / "x64" / src, dst)
+        z.writestr("DXVK_LICENSE.txt", player_text(lic, ver))
+        z.writestr("README_DXVK.txt", player_text(ROOT / "package" / "README_DXVK.txt", ver))
+    with zipfile.ZipFile(zp) as z:
+        names = sorted(n for n in z.namelist() if not n.endswith("/"))
+        want = sorted([d for d, _ in DXVK_FILES.values()] + ["DXVK_LICENSE.txt", "README_DXVK.txt"])
+        if names != want or any(hashlib.sha256(z.read(d)).hexdigest() != s for d, s in DXVK_FILES.values()):
+            sys.exit(f"дополнение DXVK собрано неправильно: {names}")
+    print(f"дополнение DXVK: {zp} ({zp.stat().st_size // 1024} КБ, версия {ver})")
+    return zp
+
+
 def check_package(zp, dll, ver):
     """что в архиве: ровно PACKAGE_FILES, ни одной программы, та же DLL, ini и инструкции с версией"""
     import zipfile
@@ -843,3 +904,4 @@ if __name__ == "__main__":
             install(d)
         if a.package:
             package(d)
+            package_dxvk()

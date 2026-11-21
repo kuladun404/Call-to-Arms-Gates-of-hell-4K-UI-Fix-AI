@@ -6,6 +6,19 @@
 
 ## Русский
 
+### 2.1-alpha — 21.11.2026 (пробная)
+
+**Новое**
+- **DXVK на Windows.** Мод может передавать работу не системному `d3d11.dll`, а DXVK (графика через Vulkan). Дополнение `…-DXVK-addon.zip` в выпуске — официальный DXVK 3.1.1 без изменений, оба файла проверены на VirusTotal. Если рядом с модом лежит `d3d11_dxvk.dll`, мод включает DXVK сам; настройка `next_d3d11=` в `ui4k.ini` задаёт другой файл, `next_d3d11=system` — всегда системный.
+- **Linux / Steam Deck (Proton), пробно.** Там DXVK уже встроен; нужен только параметр запуска `WINEDLLOVERRIDES="d3d11=n,b" %command%`. Мод пишет в `ui4k.log`, что работает под Wine.
+- Предупреждение «на свой страх и риск» в инструкциях архива.
+- Если игра упадёт, мод записывает в `ui4k.log`, где именно (модуль и цепочку вызовов) — по этой записи можно найти причину.
+
+**Исправлено**
+- С DXVK игра вылетала при смене MSAA в настройках: мод второй раз оборачивал окно игры поверх обёртки драйвера, и вызовы шли по кругу.
+
+**Что проверено:** DXVK на Windows, NVIDIA — меню и бой (иконки и текст такие же, как без DXVK), смена масштаба на ходу, HDR, смена MSAA в обе стороны, сворачивание окна, снимок Steam (F12). **Не проверено:** Linux и Steam Deck, видеокарты AMD и Intel с DXVK.
+
 ### 2.0 — 20.11.2026
 
 Выпуск 2.0. Всё, что было в бете, плюс чёткие буквы, чёткие иконки предметов и исправления по разбору игры.
@@ -73,6 +86,19 @@
 ---
 
 ## English
+
+### 2.1-alpha — 2026-11-21 (experimental)
+
+**New**
+- **DXVK on Windows.** The mod can hand the work to DXVK (graphics through Vulkan) instead of the system `d3d11.dll`. The add-on `…-DXVK-addon.zip` in the release is the official DXVK 3.1.1, unmodified, both files checked on VirusTotal. If `d3d11_dxvk.dll` lies next to the mod, the mod turns DXVK on by itself; `next_d3d11=` in `ui4k.ini` picks another file, `next_d3d11=system` always the system one.
+- **Linux / Steam Deck (Proton), experimental.** DXVK is already built in there; only the launch option `WINEDLLOVERRIDES="d3d11=n,b" %command%` is needed. The mod notes in `ui4k.log` that it runs under Wine.
+- "Use at your own risk" note in the archive's instructions.
+- If the game crashes, the mod writes into `ui4k.log` where exactly (module and call chain) — that record helps find the cause.
+
+**Fixed**
+- With DXVK the game crashed when MSAA was changed in the settings: the mod wrapped the game window a second time on top of the driver's wrapper, and calls went round in a loop.
+
+**Tested:** DXVK on Windows, NVIDIA — menu and battle (icons and text the same as without DXVK), scale change on the fly, HDR, MSAA switched both ways, minimizing the window, Steam screenshot (F12). **Not tested:** Linux and Steam Deck, AMD and Intel graphics with DXVK.
 
 ### 2.0 — 2026-11-20
 

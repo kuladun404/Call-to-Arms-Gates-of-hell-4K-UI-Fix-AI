@@ -1,6 +1,8 @@
 /* F02: прокси d3d11.dll. Грузит системную d3d11.dll, пробрасывает все экспорты (заглушки jmp из stubs.S,
  * генерирует build.py), перехватывает создание устройства. */
 #include "common.h"
+#include <stdio.h>
+#include <string.h>
 
 static const char *const g_names[] = {
 #define X(n) #n,
@@ -12,6 +14,25 @@ void *g_real[sizeof(g_names) / sizeof(g_names[0])];
 static HMODULE g_sys;
 static BYTE *g_sys_base;
 static SIZE_T g_sys_size;
+
+/* есть ли в файле строка s (файл читается кусками; совпадение на стыке кусков тоже находится) */
+static int file_has(const WCHAR *path, const char *s)
+{
+    HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, 0, NULL);
+    if (f == INVALID_HANDLE_VALUE) return 0;
+    static char buf[65536 + 64];
+    size_t n = strlen(s), keep = 0;
+    DWORD got;
+    int found = 0;
+    while (!found && ReadFile(f, buf + keep, 65536, &got, NULL) && got) {
+        size_t len = keep + got;
+        for (size_t i = 0; i + n <= len && !found; i++) found = !memcmp(buf + i, s, n);
+        keep = len >= n - 1 ? n - 1 : len;   /* хвост — к началу следующего куска */
+        memmove(buf, buf + len - keep, keep);
+    }
+    CloseHandle(f);
+    return found;
+}
 
 int ui4k_from_d3d(void *ra)
 {
@@ -95,10 +116,44 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID res)
     DisableThreadLibraryCalls(inst);
     vt_init();
     config_load(inst);
+    if (g_cfg.log) crash_install();
+    /* Linux / Steam Deck: Wine (Proton) — там системная d3d11.dll уже DXVK; поведение окон и режимов отличается */
+    typedef const char *(CDECL *PFN_WINEVER)(void);
+    PFN_WINEVER wine_ver = (PFN_WINEVER)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "wine_get_version");
+    if (wine_ver) LOG("wine: running under Wine / Proton %s - Linux support is experimental, please send this log", wine_ver());
+    if (wine_ver && g_next_auto) {   /* DXVK для Windows из дополнения поверх DXVK Proton — два разных DXVK вместе */
+        LOG("wine: %ls next to the mod is ignored - Proton has its own DXVK; delete d3d11_dxvk.dll and dxgi.dll "
+            "(or set next_d3d11= in ui4k.ini to use it anyway)", g_next_d3d11);
+        g_next_d3d11[0] = 0;
+    }
     WCHAR p[MAX_PATH];
+    if (g_next_d3d11[0]) {   /* цепочка: d3d11.dll другой программы (DXVK и т. п.) вместо системной */
+        /* LOAD_WITH_ALTERED_SEARCH_PATH: её зависимости (dxgi.dll DXVK) ищутся сначала в её папке */
+        g_sys = LoadLibraryExW(g_next_d3d11, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+        DWORD err = GetLastError();
+        if (g_sys == (HMODULE)inst) {   /* указали саму себя: бесконечная цепочка */
+            FreeLibrary(g_sys);
+            g_sys = NULL;
+            LOG("next_d3d11=%ls is the mod itself - ignored, the system d3d11.dll is used", g_next_d3d11);
+        } else if (!g_sys) {
+            LOG("next_d3d11: cannot load %ls (error %lu) - the system d3d11.dll is used", g_next_d3d11, err);
+        } else {
+            LOG("next_d3d11: %ls is used instead of the system d3d11.dll", g_next_d3d11);
+        }
+    }
     GetSystemDirectoryW(p, MAX_PATH);
     lstrcatW(p, L"\\d3d11.dll");
-    g_sys = LoadLibraryW(p);
+    if (!g_sys) {
+        g_sys = LoadLibraryW(p);
+        /* exe грузит dxgi.dll из своей папки раньше мода (Exe.md: импорт CreateDXGIFactory). dxgi.dll из DXVK
+         * без d3d11 из DXVK — игра не запустится; под Wine такой dxgi.dll в папке не берётся (встроенный Proton) */
+        WCHAR dx[MAX_PATH];
+        if (!wine_ver && dir_file(dx, L"dxgi.dll") && file_has(dx, "DXVK_LOG_LEVEL"))
+            LOG("WARNING: %ls is DXVK's dxgi.dll, but DXVK's d3d11 is not used (%s) - the game will not start properly. "
+                "Delete dxgi.dll (and d3d11_dxvk.dll) to play without DXVK, or put DXVK's d3d11.dll next to the mod as "
+                "d3d11_dxvk.dll and remove next_d3d11=system from ui4k.ini", dx,
+                !lstrcmpiW(g_next_d3d11, L"") ? "no d3d11_dxvk.dll next to the mod or next_d3d11=system" : "it did not load");
+    }
     if (!g_sys) {
         LOG("FATAL: cannot load %ls", p);
         return FALSE;
@@ -106,10 +161,17 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID res)
     g_sys_base = (BYTE *)g_sys;
     g_sys_size = ((IMAGE_NT_HEADERS *)(g_sys_base + ((IMAGE_DOS_HEADER *)g_sys_base)->e_lfanew))->OptionalHeader.SizeOfImage;
     int missing = 0;
+    char miss[600];
+    int mp = 0;
+    miss[0] = 0;
     for (size_t i = 0; i < sizeof(g_names) / sizeof(g_names[0]); i++) {
         g_real[i] = (void *)GetProcAddress(g_sys, g_names[i]);
         missing += g_real[i] == NULL;
+        if (!g_real[i] && mp < (int)sizeof miss - 48) mp += snprintf(miss + mp, sizeof miss - mp, "%s%s", mp ? ", " : "", g_names[i]);
     }
+    if (missing && g_next_d3d11[0])   /* Exe.md: игра берёт у d3d11.dll только D3D11CreateDeviceAndSwapChain */
+        LOG("next_d3d11: %d exports are not in it (the game itself uses only D3D11CreateDeviceAndSwapChain): %s%s", missing,
+            miss, mp >= (int)sizeof miss - 48 ? "..." : "");
     char exe[MAX_PATH];
     GetModuleFileNameA(NULL, exe, MAX_PATH);
     LOG("ui4k %s loaded into %s; enabled=%d scale=%d/%d log=%d; exports %zu (missing in system dll: %d)", UI4K_VERSION,
