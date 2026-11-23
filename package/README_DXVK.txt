@@ -14,6 +14,8 @@ DXVK переводит графику игры с Direct3D на Vulkan. На Wi
 
 ВНИМАНИЕ: если в binaries\x64 уже есть свой dxgi.dll (ReShade, Special K и т. п.), этот архив его заменит.
 Сначала сохраните свой dxgi.dll в другом месте или не ставьте дополнение.
+Уже стоит свой DXVK? Это дополнение не нужно: переименуйте d3d11.dll вашего DXVK в d3d11_dxvk.dll,
+а его dxgi.dll оставьте как есть.
 
 Установка: закройте игру и перетащите папку binaries из этого архива в папку игры (как мод).
 Мод сам увидит d3d11_dxvk.dll и включит DXVK. В ui4k.log появится строка
@@ -40,6 +42,8 @@ DXVK translates the game's graphics from Direct3D to Vulkan. On Windows it somet
 
 WARNING: if binaries\x64 already has its own dxgi.dll (ReShade, Special K etc.), this archive replaces it.
 Save your dxgi.dll somewhere else first, or don't install the add-on.
+Already using your own DXVK? You don't need this add-on: rename your DXVK's d3d11.dll to d3d11_dxvk.dll
+and keep its dxgi.dll as it is.
 
 Installing: close the game and drag the binaries folder from this archive into the game folder (like the mod).
 The mod finds d3d11_dxvk.dll and turns DXVK on by itself. ui4k.log then has the line

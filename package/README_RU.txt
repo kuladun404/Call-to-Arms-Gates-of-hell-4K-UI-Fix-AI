@@ -98,6 +98,8 @@ DXVK переводит графику игры с Direct3D на Vulkan. На Wi
 3. Убрать DXVK: удалите ОБА файла, d3d11_dxvk.dll и dxgi.dll (один dxgi.dll без пары ломает запуск).
 Запись «next_d3d11 ... is used instead of the system d3d11.dll» в ui4k.log — DXVK работает.
 DXVK пишет рядом с игрой свои журналы call_to_arms_d3d11.log и call_to_arms_dxgi.log — это нормально.
+Уже стоит свой DXVK? Дополнение не нужно: переименуйте d3d11.dll вашего DXVK в d3d11_dxvk.dll
+(его место займёт мод), а его dxgi.dll оставьте как есть. Мод сам возьмёт ваш DXVK.
 
 
 КАК ПЕРЕКЛЮЧАТЬСЯ (игра закрыта)
@@ -115,6 +117,8 @@ DXVK пишет рядом с игрой свои журналы call_to_arms_d3
 
 LINUX И STEAM DECK (ПРОБНО)
 
+Только для Linux и Steam Deck! В Windows никакие параметры запуска не нужны — с этой строкой
+игра в Windows не запустится.
 В Proton DXVK уже встроен, дополнение DXVK не ставьте (мод под Linux его и не возьмёт).
 Установите мод как обычно и пропишите в Steam: игра → Свойства → Параметры запуска:
     WINEDLLOVERRIDES="d3d11=n,b" %command%

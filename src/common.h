@@ -232,6 +232,7 @@ void cb_key(void);                                  /* Э3: Ctrl+F6 из Present
 
 /* ---- anchors.c: опоры мода узнаются у игры (её архив шейдеров), а не зашиты — устойчивость к обновлениям ---- */
 extern WCHAR g_shaderpak[MAX_PATH];                 /* тесты: test_shader_pak= */
+extern WCHAR g_shadercache[MAX_PATH];               /* тесты: test_shader_cache= (кэш, собранный игрой) */
 int  anchors_ui_vs(const void *code, SIZE_T n);     /* байткод — VS интерфейса по именам из кэша игры */
 int  anchors_ui_learned(void);                      /* сколько отпечатков VS интерфейса узнано по именам */
 int  anchors_scene_floats(void);                    /* размер буфера сцены из shader_constants.h игры; 0 — не узнали */

@@ -225,7 +225,7 @@ static HRESULT STDMETHODCALLTYPE hk_CreateComputeShader(ID3D11Device *d, const v
     if (!c || !o || dxbc_find_binding(c, n, "scene_Buffer") < 0) return orig(d, c, n, l, o);   /* !o — игра только проверяет */
     char name[300] = "";
     const char *why = "not found in the game's shader cache";
-    if (pak_cs_name(gd_pak(), c, n, name, sizeof name)) {
+    if (gd_cs_name(c, n, name, sizeof name)) {
         ID3DBlob *b = rebuild(name, (const BYTE *)c, n, &why);
         if (b) {
             const void *bc = ID3D10Blob_GetBufferPointer(b);

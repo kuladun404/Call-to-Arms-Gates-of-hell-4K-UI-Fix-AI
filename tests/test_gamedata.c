@@ -116,6 +116,73 @@ int main(int argc, char **argv)
         }
     }
     free(b);
+
+    /* 23.11: кэш, собранный игрой (у игрока с модами в архиве только исходники): папка, файл на шейдер */
+    {
+        wchar_t dir[MAX_PATH], tmp[MAX_PATH];
+        GetTempPathW(MAX_PATH, tmp);
+        wsprintfW(dir, L"%sui4k_ucache_%lu", tmp, GetCurrentProcessId());
+        CreateDirectoryW(dir, NULL);
+        char hex[33];
+        shader_cache_hex(UI[3], hex);
+        CHECK(strlen(hex) == 32, "cache file name");
+        /* запись как у игры: байт длины, имя (регистр как есть), DXBC */
+        unsigned char rec[512];
+        size_t l = strlen(UI[3]);
+        rec[0] = (unsigned char)l;
+        memcpy(rec + 1, UI[3], l);
+        unsigned char dx[32] = "DXBC" "COMPILED-BY-GAME";
+        dx[24] = 32;   /* длина байткода */
+        memcpy(rec + 1 + l, dx, 32);
+        wchar_t f[MAX_PATH];
+        wsprintfW(f, L"%s\\%S.vso", dir, hex);
+        HANDLE h = CreateFileW(f, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+        DWORD w = 0;
+        WriteFile(h, rec, (DWORD)(1 + l + 32), &w, NULL);
+        CloseHandle(h);
+        /* вычислительный шейдер — для обратного поиска по байткоду */
+        const char *cs = "postprocess/histogram[HistogramBinsCS]";
+        unsigned char csdx[40] = "DXBC" "COMPUTE-SHADER-X";
+        csdx[24] = 40;
+        shader_cache_hex(cs, hex);
+        wsprintfW(f, L"%s\\%S.cso", dir, hex);
+        l = strlen(cs);
+        rec[0] = (unsigned char)l;
+        memcpy(rec + 1, cs, l);
+        memcpy(rec + 1 + l, csdx, 40);
+        h = CreateFileW(f, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+        WriteFile(h, rec, (DWORD)(1 + l + 40), &w, NULL);
+        CloseHandle(h);
+
+        size_t len = 0;
+        const unsigned char *c = dir_shader(dir, UI[3], &len);
+        CHECK(c && len == 32 && !memcmp(c + 4, "COMPILED-BY-GAME", 16), "interface VS not found in the game-compiled cache folder");
+        c = dir_shader(dir, "vs[VS]$VNORMAL$VCOLOR$VTEXCOORDS#1$TEXCOORDS#1$use_vcolor", &len);   /* регистр имени не важен */
+        CHECK(c != NULL, "name lookup in the cache folder must ignore case");
+        CHECK(dir_shader(dir, UI[0], &len) == NULL, "a shader that is not in the folder must not be found");
+        char nm[300] = "";
+        CHECK(dir_cs_name(dir, csdx, 40, nm, sizeof nm) && !strcmp(nm, cs), "compute shader name by bytecode: '%s'", nm);
+        unsigned char other[40];
+        memcpy(other, csdx, 40);
+        other[10] ^= 1;
+        CHECK(!dir_cs_name(dir, other, 40, nm, sizeof nm), "different bytecode must not match");
+        CHECK(dir_shader(L"", UI[3], &len) == NULL && dir_shader(NULL, UI[3], &len) == NULL, "empty folder path");
+
+        wchar_t pat[MAX_PATH];
+        wsprintfW(pat, L"%s\\*", dir);
+        WIN32_FIND_DATAW fd;
+        HANDLE fh = FindFirstFileW(pat, &fd);
+        if (fh != INVALID_HANDLE_VALUE) {
+            do {
+                if (fd.cFileName[0] == L'.') continue;
+                wsprintfW(f, L"%s\\%s", dir, fd.cFileName);
+                DeleteFileW(f);
+            } while (FindNextFileW(fh, &fd));
+            FindClose(fh);
+        }
+        RemoveDirectoryW(dir);
+    }
+
     printf(fails ? "FAIL %d\n" : "PASS\n", fails);
     return fails != 0;
 }

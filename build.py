@@ -39,7 +39,7 @@ SOURCES = ["proxy.c", "config.c", "log.c", "scale.c", "vt.c", "ctx.c", "device.c
            "dxbc.c", "pstag.c", "dof.c", "box.c", "rtti.c", "views.c", "gamedata.c", "anchors.c", "d3dbg.c", "perf.c", "origin.c", "fontpages.c", "fontpages_core.c", "crash.c"]
 HLSL = {"lum_tile": "lum_tile.hlsl", "lum_hist": "lum_hist.hlsl"}  # compute-шейдеры -> байткод в gen/lum_cs.h
 CC = [sys.executable, "-m", "ziglang", "cc", "-target", "x86_64-windows-gnu"]
-VERSION = "2.1-alpha"
+VERSION = "2.1-alpha2"
 INSTALLED = ["d3d11.dll", "ui4k.ini", "ui4k_fonts2.dat", "ui4k_fonts4.dat"]   # что кладём в binaries\x64
 FONT_DATA = OUT / "fontpages"                # образцы букв Э6 (файлы ui4k_fonts*.dat из архива выпуска)
 LEFTOVERS = ["ui4k.log", "ui4k.2.log", "ui4k.3.log", "ui4k.4.log", "ui4k_cs.txt", "ui4k_vs.txt", "ui4k_labels.pak"]  # что создаёт мод при работе
@@ -508,6 +508,11 @@ def run_tests(dll, debug=False):
         shutil.copy2(fake_lib, Path(t) / fake_lib.name)
         run("updated game: interface VS by name, scene buffer of a new size, HBAO+ buffer and radius moved, exposure rebuilt "
             "from its source", up_exe, t)
+    with tempfile.TemporaryDirectory(prefix="ui4k_v2_") as t:   # 23.11: в архиве только исходники, кэш собрала сама игра
+        shutil.copy2(dll, Path(t) / "d3d11.dll")
+        shutil.copy2(fake_lib, Path(t) / fake_lib.name)
+        run("modded game: archive with sources only, shaders from the folder the game compiles into (interface VS by name, "
+            "exposure rebuilt)", up_exe, t, "ucache")
     try:   # то же на архиве настоящей игры, если она здесь есть
         real_pak = find_game() / "resource" / "shader.pak"
     except (SystemExit, Exception):

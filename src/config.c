@@ -151,6 +151,7 @@ void config_load(HMODULE self)
     GetPrivateProfileStringW(L"ui4k", L"test_profiles", L"", g_profiles, MAX_PATH, ini);
     GetPrivateProfileStringW(L"ui4k", L"test_appdata", L"", g_appdata, MAX_PATH, ini);
     GetPrivateProfileStringW(L"ui4k", L"test_shader_pak", L"", g_shaderpak, MAX_PATH, ini);
+    GetPrivateProfileStringW(L"ui4k", L"test_shader_cache", L"", g_shadercache, MAX_PATH, ini);
     g_cfg.game_hdr = g_ini_hdr = ini_int(ini, L"game_hdr", -2);   /* -2: смотреть в профиль игры; 0/1 — задать (тесты) */
     int aa = g_ini_aa = ini_int(ini, L"game_aa", -2);             /* то же для MSAA: -2 — профиль; 0 / число выборок */
     if (g_cfg.game_hdr == -2 || aa == -2) {

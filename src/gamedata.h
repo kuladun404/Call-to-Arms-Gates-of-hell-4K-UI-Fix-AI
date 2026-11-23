@@ -25,5 +25,17 @@ int pak_screen_slots(const Pak *p, unsigned *out, int max, int *names, unsigned 
 /*   exact (может быть NULL) — по месту на каждое out[]: 1 — только точное совпадение со значением экрана (место, где в
  *   других проходах лежат обычные числа, например позиция камеры), 0 — с допуском ±1 пиксель малой картинки */
 
+/* Кэш, который игра собирает сама (Documents\my games\gates of hell\shader_cache\dx11.0, «Реверс»/Шейдеры): чего нет в
+ * архиве, игра компилирует при запуске и кладёт сюда — файл на шейдер, имя и содержимое как у записей кэша в архиве.
+ * 23.11: у игрока с модами в resource\shader.pak были только исходники (92 файла), весь кэш — здесь. */
+void shader_cache_hex(const char *name, char hex[33]);   /* «<md5 имени в нижнем регистре>», "" — не вышло */
+/* шейдер из этой папки по имени: байткод (память HeapAlloc, держится до конца работы) и длина; NULL — нет */
+const unsigned char *dir_shader(const wchar_t *dir, const char *name, size_t *len);
+/* обратный поиск по байткоду среди вычислительных шейдеров (.cso) этой папки; 1 — найдено */
+int dir_cs_name(const wchar_t *dir, const void *code, size_t n, char *name, size_t cap);
+
 /* ---- архив игры (DLL): открывается один раз, при первой надобности ---- */
 const Pak *gd_pak(void);   /* NULL — архива нет или он не разобран */
+/* шейдер по имени: сначала архив, потом кэш, собранный игрой; from — 1 архив, 2 кэш игры */
+const unsigned char *gd_shader(const char *name, size_t *len, int *from);
+int gd_cs_name(const void *code, size_t n, char *name, size_t cap);   /* то же для обратного поиска (.cso) */

@@ -5,6 +5,7 @@
  * Каждая опора пишет в лог, откуда она взята. */
 #include "common.h"
 #include "gamedata.h"
+#include <shlobj.h>
 #include <stdio.h>
 
 WCHAR g_shaderpak[MAX_PATH];   /* путь к архиву шейдеров; пусто — <папка игры>\resource\shader.pak (тесты: test_shader_pak=) */
@@ -42,6 +43,49 @@ const Pak *gd_pak(void)
     return g_pak_ok ? &g_pak : NULL;
 }
 
+/* кэш, собранный игрой (gamedata.h): Documents\my games\gates of hell\shader_cache\dx11.0 */
+WCHAR g_shadercache[MAX_PATH];   /* пусто — по умолчанию (тесты: test_shader_cache=) */
+static WCHAR g_ucdir[MAX_PATH];
+static INIT_ONCE g_ucone = INIT_ONCE_STATIC_INIT;
+
+static BOOL CALLBACK find_ucache(PINIT_ONCE o, PVOID a, PVOID *c)
+{
+    (void)o; (void)a; (void)c;
+    if (g_shadercache[0]) lstrcpynW(g_ucdir, g_shadercache, MAX_PATH);
+    else if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PERSONAL, NULL, 0, g_ucdir)) && lstrlenW(g_ucdir) < MAX_PATH - 80)
+        lstrcatW(g_ucdir, L"\\my games\\gates of hell\\shader_cache\\dx11.0");
+    else g_ucdir[0] = 0;
+    DWORD at = g_ucdir[0] ? GetFileAttributesW(g_ucdir) : INVALID_FILE_ATTRIBUTES;
+    if (at == INVALID_FILE_ATTRIBUTES || !(at & FILE_ATTRIBUTE_DIRECTORY)) g_ucdir[0] = 0;
+    else   /* путь по умолчанию — без имени пользователя Windows: логи игроки выкладывают на GitHub */
+        LOG("gamedata: shaders compiled by the game itself are also looked up in %ls",
+            g_shadercache[0] ? g_ucdir : L"Documents\\my games\\gates of hell\\shader_cache\\dx11.0");
+    return TRUE;
+}
+
+static const WCHAR *ucache(void)
+{
+    InitOnceExecuteOnce(&g_ucone, find_ucache, NULL, NULL);
+    return g_ucdir[0] ? g_ucdir : NULL;
+}
+
+const unsigned char *gd_shader(const char *name, size_t *len, int *from)
+{
+    const Pak *p = gd_pak();
+    const unsigned char *c = p ? pak_shader(p, name, len) : NULL;
+    if (c) { if (from) *from = 1; return c; }
+    c = ucache() ? dir_shader(ucache(), name, len) : NULL;
+    if (from) *from = c ? 2 : 0;
+    return c;
+}
+
+int gd_cs_name(const void *code, size_t n, char *name, size_t cap)
+{
+    const Pak *p = gd_pak();
+    if (p && pak_cs_name(p, code, n, name, cap)) return 1;
+    return ucache() && dir_cs_name(ucache(), code, n, name, cap);
+}
+
 /* ---- VS интерфейса ---- */
 /* Все имена, под которыми в кэше игры (16.11) лежат два VS интерфейса: общий шейдер vs.hlsl с цветом вершин. */
 static const char *const UI_VS_NAMES[] = {
@@ -63,20 +107,22 @@ static INIT_ONCE g_uionce = INIT_ONCE_STATIC_INIT;
 static BOOL CALLBACK learn_ui(PINIT_ONCE o, PVOID a, PVOID *c)
 {
     (void)o; (void)a; (void)c;
-    const Pak *p = gd_pak();
-    int found = 0;
-    for (size_t i = 0; p && i < NUI; i++) {
+    int found = 0, in_dir = 0;
+    for (size_t i = 0; i < NUI; i++) {
         size_t n;
-        const BYTE *code = pak_shader(p, UI_VS_NAMES[i], &n);
+        int from = 0;
+        const BYTE *code = gd_shader(UI_VS_NAMES[i], &n, &from);
         if (!code) continue;
         found++;
+        in_dir += from == 2;
         int dup = 0;
         for (int j = 0; j < g_nui; j++) dup |= !memcmp(g_ui[j], code + 4, 8);
         if (!dup) memcpy(g_ui[g_nui++], code + 4, 8);
     }
-    if (p)
-        LOG("gamedata: interface vertex shaders - %d of %d names found in the game's shader cache, %d distinct%s", found, (int)NUI,
-            g_nui, found ? "" : " - names gone (game update?), using the checksums known on 16.11");
+    if (gd_pak() || ucache())
+        LOG("gamedata: interface vertex shaders - %d of %d names found (%d in the archive, %d compiled by the game), %d distinct%s",
+            found, (int)NUI, found - in_dir, in_dir, g_nui,
+            found ? "" : " - names gone (game update?), using the checksums known on 16.11");
     return TRUE;
 }
 

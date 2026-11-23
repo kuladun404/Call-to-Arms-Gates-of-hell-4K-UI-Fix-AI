@@ -4,7 +4,10 @@
  * именем игры, но с новым байткодом (собран здесь), буфер сцены — 40 групп (160 чисел вместо 156). Библиотека HBAO+
  * (поддельная, по имени модуля) создаёт буфер на 100 чисел, радиус в нём сдвинут на [44] (за ним R² и −1/R²).
  * Мод должен: узнать шейдер интерфейса по имени, править экранные числа в буфере на 160, узнать буфер HBAO+ на 100 и
- * его радиус. Экран 1280x720, x1.5 (физический 1920x1080). Последняя строка PASS/FAIL. */
+ * его радиус. Экран 1280x720, x1.5 (физический 1920x1080). Последняя строка PASS/FAIL.
+ *   test_update.exe <папка> ucache — то же, но в архиве только исходники (как у игрока с модами, 23.11), а
+ *   скомпилированные шейдеры лежат файлами в отдельной папке, как их собирает сама игра в
+ *   Documents\my games\gates of hell\shader_cache\dx11.0 (test_shader_cache=). */
 #define COBJMACROS
 #include <stdio.h>
 #include <stdlib.h>
@@ -158,7 +161,7 @@ static int t_real(const char *pakpath, ID3D11Device *dev)
     if (v) ID3D11Device_CreateVertexShader(dev, v, len, NULL, &vs);
     if (vs) ID3D11VertexShader_Release(vs);
     read_log();
-    CHECK(strstr(g_log, "interface vertex shaders - 9 of 9 names found in the game's shader cache, 2 distinct"), "log: 9 names / 2 VS");
+    CHECK(strstr(g_log, "interface vertex shaders - 9 of 9 names found (9 in the archive, 0 compiled by the game), 2 distinct"), "log: 9 names / 2 VS");
     CHECK(strstr(g_log, "world: interface vertex shader"), "real interface VS not recognised");
     CHECK(strstr(g_log, "scene constant buffer - 156 floats") || 1, "-");
     pak_free(&p);
@@ -216,11 +219,31 @@ int main(int argc, char **argv)
                  {"shader/dx10/sky.hlsl", sky_src, sizeof sky_src - 1},
                  {"shader/dx10/postprocess/lenseffects/lens_effects.hlsl", fxaa_src, sizeof fxaa_src - 1}};
     int real = argc > 3 && !strcmp(argv[2], "real");
+    int ucache = argc > 2 && !strcmp(argv[2], "ucache");
+    char ucdir[MAX_PATH] = "";
     if (real) lstrcpynA(pak, argv[3], MAX_PATH);   /* архив настоящей игры, поддельный не пишем */
-    else CHECK(write_zip(pak, z, 10), "archive not written");
+    else if (ucache) {
+        /* в архиве — только исходники; кэш-записи — файлами «<md5>.vso|cso» в папке, как у игры */
+        Ent src[8];
+        int ns = 0;
+        for (int i = 0; i < 10; i++) if (z[i].data != e && z[i].data != e2) src[ns++] = z[i];
+        CHECK(ns == 8 && write_zip(pak, src, ns), "sources-only archive not written");
+        snprintf(ucdir, sizeof ucdir, "%s\\shader_cache", dir);
+        CreateDirectoryA(ucdir, NULL);
+        const char *uent[2] = {ent, ent2};
+        const unsigned char *ud[2] = {e, e2};
+        size_t un[2] = {elen, e2len};
+        for (int i = 0; i < 2; i++) {
+            snprintf(path, sizeof path, "%s\\%s", ucdir, strrchr(uent[i], '/') + 1);
+            FILE *cf = fopen(path, "wb");
+            CHECK(cf && fwrite(ud[i], 1, un[i], cf) == un[i], "cache file %s not written", path);
+            if (cf) fclose(cf);
+        }
+    } else CHECK(write_zip(pak, z, 10), "archive not written");
     snprintf(path, sizeof path, "%s\\ui4k.ini", dir);
     FILE *f = fopen(path, "wb");
     fprintf(f, "[ui4k]\nenabled=1\nscale=1.5\nlog=2\npresets=0\nfit_native=0\nrender=50\ngame_hdr=1\ngame_aa=0\ntest_shader_pak=%s\n", pak);
+    if (ucache) fprintf(f, "test_shader_cache=%s\n", ucdir);
     fclose(f);
 
     snprintf(path, sizeof path, "%s\\d3d11.dll", dir);
@@ -246,6 +269,12 @@ int main(int argc, char **argv)
     ID3D11Device_CreateVertexShader(dev, code, clen, NULL, &v);
     read_log();
     CHECK(strstr(g_log, "interface vertex shaders - 1 of 9 names found"), "interface VS names not looked up in the archive");
+    if (ucache) {
+        CHECK(strstr(g_log, "1 of 9 names found (0 in the archive, 1 compiled by the game)"),
+              "interface VS name must come from the folder the game compiles into");
+        CHECK(strstr(g_log, "shaders compiled by the game itself are also looked up in"), "log: game cache folder");
+    } else
+        CHECK(strstr(g_log, "(1 in the archive, 0 compiled by the game)"), "interface VS name must come from the archive");
     CHECK(strstr(g_log, "world: interface vertex shader"), "updated interface VS not recognised by name");
 
     /* 2. буфер сцены 160 чисел: экранная пара (1280, 720) -> (1920, 1080) */

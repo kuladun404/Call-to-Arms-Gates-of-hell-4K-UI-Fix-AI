@@ -67,16 +67,40 @@ static int md5(const void *d, ULONG n, BYTE out[16])
     return ok;
 }
 
-const unsigned char *pak_shader(const Pak *p, const char *name, size_t *len)
+void shader_cache_hex(const char *name, char hex[33])
 {
     char low[512];
     size_t l = strlen(name);
-    if (!p || !l || l >= sizeof low || l > 255) return NULL;
+    hex[0] = 0;
+    if (!l || l >= sizeof low || l > 255) return;
     for (size_t i = 0; i <= l; i++) low[i] = (char)(name[i] >= 'A' && name[i] <= 'Z' ? name[i] + 32 : name[i]);
     BYTE h[16];
-    if (!md5(low, (ULONG)l, h)) return NULL;
-    char hex[34];
+    if (!md5(low, (ULONG)l, h)) return;
     for (int i = 0; i < 16; i++) { static const char d[] = "0123456789abcdef"; hex[2 * i] = d[h[i] >> 4]; hex[2 * i + 1] = d[h[i] & 15]; }
+    hex[32] = 0;
+}
+
+/* запись кэша «байт длины, имя, DXBC» с этим именем: байткод и длина; NULL — не то */
+static const unsigned char *entry_code(const unsigned char *d, size_t size, const char *name, size_t *len)
+{
+    size_t l = strlen(name);
+    if (size < 1 + l + 32 || d[0] != l ||
+        CompareStringA(LOCALE_INVARIANT, NORM_IGNORECASE, (const char *)d + 1, (int)l, name, (int)l) != CSTR_EQUAL)
+        return NULL;
+    const unsigned char *code = d + 1 + l;
+    size_t n = size - 1 - l;
+    if (n < 32 || memcmp(code, "DXBC", 4) || rd32(code + 24) > n) return NULL;
+    if (len) *len = rd32(code + 24);
+    return code;
+}
+
+const unsigned char *pak_shader(const Pak *p, const char *name, size_t *len)
+{
+    size_t l = strlen(name);
+    if (!p || !l || l > 255) return NULL;
+    char hex[34];
+    shader_cache_hex(name, hex);
+    if (!hex[0]) return NULL;
     hex[32] = '.'; hex[33] = 0;
     /* «.../<md5>.?so» в любой папке кэша: каталог (dx11.0) и расширение (vso, pso, cso...) не важны */
     for (int i = 0; i < p->n; i++) {
@@ -84,18 +108,80 @@ const unsigned char *pak_shader(const Pak *p, const char *name, size_t *len)
         if (e->nlen < 37) continue;
         const char *s = e->name + e->nlen - 37;   /* "/" + 32 + "." + 3 */
         if (s[0] != '/' || memcmp(s + 1, hex, 33) != 0) continue;
-        const unsigned char *d = p->base + e->off;
         /* внутри — то же имя: защита от чужого файла с похожим именем */
-        if (e->size < 1 + l + 32 || d[0] != l || CompareStringA(LOCALE_INVARIANT, NORM_IGNORECASE, (const char *)d + 1, (int)l, name,
-                                                               (int)l) != CSTR_EQUAL)
-            continue;
-        const unsigned char *code = d + 1 + l;
-        size_t n = e->size - 1 - l;
-        if (n < 32 || memcmp(code, "DXBC", 4) || rd32(code + 24) > n) continue;
-        if (len) *len = rd32(code + 24);
-        return code;
+        const unsigned char *code = entry_code(p->base + e->off, e->size, name, len);
+        if (code) return code;
     }
     return NULL;
+}
+
+/* файл целиком в память HeapAlloc (до 8 МБ); NULL — нет */
+static unsigned char *read_all(const wchar_t *path, size_t *n)
+{
+    HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, 0, NULL);
+    if (f == INVALID_HANDLE_VALUE) return NULL;
+    LARGE_INTEGER sz = {0};
+    unsigned char *b = NULL;
+    DWORD got = 0;
+    if (GetFileSizeEx(f, &sz) && sz.QuadPart > 0 && sz.QuadPart <= (8 << 20) &&
+        (b = (unsigned char *)HeapAlloc(GetProcessHeap(), 0, (size_t)sz.QuadPart)) &&
+        (!ReadFile(f, b, (DWORD)sz.QuadPart, &got, NULL) || got != (DWORD)sz.QuadPart)) {
+        HeapFree(GetProcessHeap(), 0, b);
+        b = NULL;
+    }
+    CloseHandle(f);
+    if (b) *n = (size_t)sz.QuadPart;
+    return b;
+}
+
+const unsigned char *dir_shader(const wchar_t *dir, const char *name, size_t *len)
+{
+    static const wchar_t *const EXT[] = {L"vso", L"pso", L"cso", L"dso", L"hso", L"gso"};
+    char hex[33];
+    if (!dir || !dir[0]) return NULL;
+    shader_cache_hex(name, hex);
+    if (!hex[0] || lstrlenW(dir) > MAX_PATH - 40) return NULL;
+    for (size_t i = 0; i < sizeof EXT / sizeof *EXT; i++) {
+        wchar_t p[MAX_PATH];
+        wsprintfW(p, L"%s\\%S.%s", dir, hex, EXT[i]);
+        size_t n = 0;
+        unsigned char *b = read_all(p, &n);
+        if (!b) continue;
+        const unsigned char *code = entry_code(b, n, name, len);
+        if (code) return code;   /* буфер остаётся: указатель на байткод живёт до конца работы */
+        HeapFree(GetProcessHeap(), 0, b);
+    }
+    return NULL;
+}
+
+int dir_cs_name(const wchar_t *dir, const void *code, size_t n, char *name, size_t cap)
+{
+    if (!dir || !dir[0] || !code || n < 32 || lstrlenW(dir) > MAX_PATH - 40) return 0;
+    wchar_t pat[MAX_PATH];
+    wsprintfW(pat, L"%s\\*.cso", dir);
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW(pat, &fd);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    int found = 0;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY || lstrlenW(dir) + lstrlenW(fd.cFileName) > MAX_PATH - 2) continue;
+        wchar_t p[MAX_PATH];
+        wsprintfW(p, L"%s\\%s", dir, fd.cFileName);
+        size_t sz = 0;
+        unsigned char *d = read_all(p, &sz);
+        if (!d) continue;
+        if (sz >= 1 + (size_t)d[0] + n) {
+            const unsigned char *c = d + 1 + d[0];
+            if (rd32(c + 24) == n && !memcmp(c, code, n) && (size_t)d[0] + 1 <= cap) {
+                memcpy(name, d + 1, d[0]);
+                name[d[0]] = 0;
+                found = 1;
+            }
+        }
+        HeapFree(GetProcessHeap(), 0, d);
+    } while (!found && FindNextFileW(h, &fd));
+    FindClose(h);
+    return found;
 }
 
 int pak_cs_name(const Pak *p, const void *code, size_t n, char *name, size_t cap)

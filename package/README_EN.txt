@@ -98,6 +98,8 @@ especially on AMD and Intel graphics cards. The mod does not need it.
 3. To remove DXVK delete BOTH files, d3d11_dxvk.dll and dxgi.dll (dxgi.dll alone breaks the start).
 The line "next_d3d11 ... is used instead of the system d3d11.dll" in ui4k.log means DXVK is working.
 DXVK writes its own logs call_to_arms_d3d11.log and call_to_arms_dxgi.log next to the game - that's normal.
+Already using your own DXVK? You don't need the add-on: rename your DXVK's d3d11.dll to d3d11_dxvk.dll
+(the mod takes its place) and keep its dxgi.dll as it is. The mod uses your DXVK by itself.
 
 
 SWITCHING (with the game closed)
@@ -115,6 +117,8 @@ into ui4k.log which file to delete.
 
 LINUX AND STEAM DECK (EXPERIMENTAL)
 
+Linux and Steam Deck ONLY! On Windows no launch option is needed - with this line the game won't start
+on Windows.
 Proton already has DXVK built in, don't install the DXVK add-on (under Linux the mod ignores it anyway).
 Install the mod as usual and set in Steam: the game → Properties → Launch options:
     WINEDLLOVERRIDES="d3d11=n,b" %command%

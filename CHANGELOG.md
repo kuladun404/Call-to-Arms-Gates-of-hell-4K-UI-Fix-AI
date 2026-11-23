@@ -6,6 +6,12 @@
 
 ## Русский
 
+### 2.1-alpha2 — 23.11.2026 (пробная)
+
+**Исправлено**
+- **Игра с модами, у которых в архиве шейдеров нет готового кэша.** Некоторые моды заменяют `resource\shader.pak` архивом только с исходниками. Тогда игра собирает шейдеры сама и кладёт их в `Документы\my games\gates of hell\shader_cache\dx11.0`. Теперь мод ищет шейдеры и там. Раньше он в этом случае опирался только на данные игры от 16.11 и мог не узнать шейдеры интерфейса. В логе: «… names found (N in the archive, M compiled by the game)».
+- **Инструкции яснее.** Строка запуска `WINEDLLOVERRIDES=…` — только для Linux / Steam Deck: в Windows с ней игра не запускается. Добавлено, как оставить свой DXVK: переименовать его `d3d11.dll` в `d3d11_dxvk.dll`, а его `dxgi.dll` оставить.
+
 ### 2.1-alpha — 21.11.2026 (пробная)
 
 **Новое**
@@ -86,6 +92,12 @@
 ---
 
 ## English
+
+### 2.1-alpha2 — 2026-11-23 (experimental)
+
+**Fixed**
+- **Games with mods whose shader archive has no precompiled cache.** Some mods replace `resource\shader.pak` with an archive of sources only. The game then compiles the shaders itself into `Documents\my games\gates of hell\shader_cache\dx11.0`. The mod now looks there too. Before, it relied only on the game data of 16.11 in that case and could miss the interface shaders. The log says: "… names found (N in the archive, M compiled by the game)".
+- **Clearer instructions.** The launch option `WINEDLLOVERRIDES=…` is for Linux / Steam Deck only: on Windows the game doesn't start with it. Added how to keep your own DXVK: rename its `d3d11.dll` to `d3d11_dxvk.dll` and keep its `dxgi.dll`.
 
 ### 2.1-alpha — 2026-11-21 (experimental)
 
